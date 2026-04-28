@@ -1,0 +1,15 @@
+{
+    "api_url": "https://192.168.22.100:8089/api",
+    "api_user": "cdrapi",
+    "api_pass": "cdrapi123",
+    "api_timeout": 2,
+    "api_connect_timeout": 1,
+    "agent_ext_min": 6001,
+    "agent_ext_max": 6099,
+    "queue_numbers": "6500",
+    "ivr_numbers": "7000",
+    "callerid_file_path": "c:\\Mdr\\CallerID",
+    "callerid_col_number": 49,
+    "callerid_col_extension": 25,
+    "callerid_col_length": 8
+}

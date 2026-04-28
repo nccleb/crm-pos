@@ -1,0 +1,166 @@
+div.content{
+
+
+height:500px;
+width:450px;
+
+float:left;
+margin:100;
+
+
+}
+
+.my-slider .carousel-indicators {
+  top: 10px;
+  justify-content:flex-start;
+  margin:0;
+  padding-left:15px;
+  padding-right:15px;
+}
+
+      
+
+
+
+div.content4{
+
+
+height:400px;
+width:350px;
+float:left;
+margin-right : 150px;;
+padding-left : 100px;
+padding-right: 100px;
+
+
+}
+
+div.content1{
+
+
+height:400px;
+width:350px;
+
+float:right;
+margin:100;
+
+}
+
+div.content3{
+
+
+height:300px;
+width:1413px;
+position: relative;
+margin:0;
+
+
+}
+
+div.content5{
+
+
+height:300px;
+width:100px;
+
+
+margin:0;
+
+
+}
+
+div.wrapper {
+	width:1425px;
+	height:1500px;
+	margin:0 auto;
+	text-align:left;
+      
+
+}
+
+body{
+
+ zoom: 0.7; 
+    -moz-transform: scale(0.7); 
+    -moz-transform-origin: 0 0;
+margin-top:0px;
+
+}
+
+
+
+
+div#first{
+background-color:#ff0000;
+
+
+}
+
+div#second{
+background-color:#00ff00;
+
+}
+
+div#third{
+background-color:#0000ff;
+
+}
+
+div#fourth{
+background-color:#ffff00;
+
+}
+
+div#fifth{
+background-color:#ffffff;
+margin:100;
+
+}
+
+div#seventh{
+
+background-color:#ffffff;
+margin:0;
+padding:0;
+}
+
+div#eight{
+float:left;
+
+}
+
+
+
+div#drag1{
+height:400px;
+width:400px;
+}
+
+div#myCanvas{
+background-color:#00008f;
+height:175px;
+width:1423px;
+margin-top: 0;
+ 
+
+}
+
+canvas#myCanvas1{
+background-color:#696969;
+
+}
+
+
+div#myCanvas1{
+background-color:#696969;
+
+
+
+ }
+
+
+
+
+
+
+
