@@ -122,13 +122,18 @@ switch ($action) {
 
         // Insert sale header
         $client_id_sql = $client_id ? $client_id : 'NULL';
-        $insert = mysqli_query($conn,
-            "INSERT INTO pos_sales (client_id, client_name, total, discount, final_total, payment_method, currency, notes, agent_id, agent_name, paid_usd, paid_lbp, change_usd, change_lbp)
-             VALUES ($client_id_sql, '$client_name', $total, $discount_usd, $final_total, '$payment_method', '$currency', '$notes', $agent_id, '$agent_name', $paid_usd, $paid_lbp, $change_usd, $change_lbp)"
-        );
+        try {
+            $insert = mysqli_query($conn,
+                "INSERT INTO pos_sales (client_id, client_name, total, discount, final_total, payment_method, currency, notes, agent_id, agent_name, paid_usd, paid_lbp, change_usd, change_lbp, status)
+                 VALUES ($client_id_sql, '$client_name', $total, $discount_usd, $final_total, '$payment_method', '$currency', '$notes', $agent_id, '$agent_name', $paid_usd, $paid_lbp, $change_usd, $change_lbp, 'completed')"
+            );
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'error' => 'DB error: ' . $e->getMessage()]);
+            break;
+        }
 
         if (!$insert) {
-            echo json_encode(['success' => false, 'error' => 'Failed to create sale']);
+            echo json_encode(['success' => false, 'error' => 'DB error: ' . mysqli_error($conn)]);
             break;
         }
 

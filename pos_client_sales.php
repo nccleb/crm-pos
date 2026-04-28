@@ -34,7 +34,7 @@ $stats = mysqli_fetch_assoc(mysqli_query($conn,
         COALESCE(SUM(discount), 0) as total_discounts,
         MAX(created_at) as last_visit
      FROM pos_sales
-     WHERE client_id = $client_id AND status != 'pending'"
+     WHERE client_id = $client_id AND status IN ('completed','pending')"
 ));
 
 // Sales list
