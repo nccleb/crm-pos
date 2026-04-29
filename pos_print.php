@@ -55,65 +55,66 @@ $pay_labels = [
 
 body {
     font-family:'Courier New', Courier, monospace;
-    font-size:12px;
+    font-size:13px;
+    font-weight:700;
     max-width:360px;
     margin:0 auto;
     padding:20px 16px;
-    color:#111;
+    color:#000;
     background:#fff;
 }
 
 /* ── Header ── */
 .header { text-align:center; margin-bottom:14px; }
-.header .company { font-size:15px; font-weight:700; letter-spacing:.5px; }
-.header .title   { font-size:13px; font-weight:700; margin:4px 0 2px; text-transform:uppercase; letter-spacing:1px; }
-.header .sub     { font-size:11px; color:#555; line-height:1.7; }
+.header .company { font-size:16px; font-weight:900; letter-spacing:.5px; }
+.header .title   { font-size:14px; font-weight:900; margin:4px 0 2px; text-transform:uppercase; letter-spacing:1px; }
+.header .sub     { font-size:12px; font-weight:700; color:#000; line-height:1.7; }
 
 /* ── Dividers ── */
-.div-solid  { border:none; border-top:2px solid #111; margin:10px 0; }
-.div-dashed { border:none; border-top:1px dashed #aaa; margin:8px 0; }
+.div-solid  { border:none; border-top:2px solid #000; margin:10px 0; }
+.div-dashed { border:none; border-top:1px dashed #555; margin:8px 0; }
 
 /* ── Info rows ── */
-.info { display:flex; justify-content:space-between; padding:2px 0; font-size:12px; }
-.info .lbl { color:#555; }
-.info .val { font-weight:700; text-align:right; }
+.info { display:flex; justify-content:space-between; padding:3px 0; font-size:13px; font-weight:700; }
+.info .lbl { color:#000; }
+.info .val { font-weight:900; text-align:right; }
 
 /* ── REFUNDED stamp ── */
 .refunded {
-    text-align:center; border:2px solid #111; padding:5px;
+    text-align:center; border:2px solid #000; padding:5px;
     font-weight:900; font-size:14px; letter-spacing:3px;
     margin:10px 0;
 }
 
 /* ── Items table ── */
-.items-tbl { width:100%; border-collapse:collapse; margin:10px 0; font-size:11.5px; }
+.items-tbl { width:100%; border-collapse:collapse; margin:10px 0; font-size:12px; }
 .items-tbl thead th {
-    border-top:1px solid #111; border-bottom:1px solid #111;
-    padding:4px 3px; text-align:left; font-weight:700;
-    text-transform:uppercase; font-size:10px; letter-spacing:.3px;
+    border-top:1px solid #000; border-bottom:1px solid #000;
+    padding:4px 3px; text-align:left; font-weight:900;
+    text-transform:uppercase; font-size:11px; letter-spacing:.3px;
 }
 .items-tbl thead th.r { text-align:right; }
 .items-tbl thead th.c { text-align:center; }
-.items-tbl tbody td { padding:5px 3px; border-bottom:1px dotted #ccc; vertical-align:top; }
+.items-tbl tbody td { padding:5px 3px; border-bottom:1px dotted #888; vertical-align:top; font-weight:700; }
 .items-tbl tbody td.c { text-align:center; }
-.items-tbl tbody td.r { text-align:right; font-weight:700; }
+.items-tbl tbody td.r { text-align:right; font-weight:900; }
 .items-tbl tbody tr:last-child td { border-bottom:none; }
 
 /* ── Totals ── */
-.t-row  { display:flex; justify-content:space-between; padding:3px 0; font-size:12px; color:#555; }
-.t-row.vat    { color:#1a1a2e; font-weight:700; }
-.t-row.disc   { color:#111; }
-.t-row.rnd-dn { color:#111; font-weight:700; }
-.t-row.rnd-up { color:#111; font-weight:700; }
-.t-total { display:flex; justify-content:space-between; font-size:15px; font-weight:900; padding:6px 0 4px; }
-.usd-box { text-align:center; border:1px dashed #aaa; padding:6px; margin:8px 0; font-size:11px; color:#555; }
-.usd-box strong { font-size:14px; font-weight:900; color:#111; display:block; }
+.t-row  { display:flex; justify-content:space-between; padding:3px 0; font-size:13px; font-weight:700; color:#000; }
+.t-row.vat    { color:#000; font-weight:900; }
+.t-row.disc   { color:#000; font-weight:700; }
+.t-row.rnd-dn { color:#000; font-weight:900; }
+.t-row.rnd-up { color:#000; font-weight:900; }
+.t-total { display:flex; justify-content:space-between; font-size:16px; font-weight:900; padding:6px 0 4px; }
+.usd-box { text-align:center; border:1px dashed #555; padding:6px; margin:8px 0; font-size:12px; font-weight:700; color:#000; }
+.usd-box strong { font-size:15px; font-weight:900; color:#000; display:block; }
 
 /* ── Payment details ── */
-.pay-title { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#555; margin:10px 0 4px; }
+.pay-title { font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:1px; color:#000; margin:10px 0 4px; }
 
 /* ── Footer ── */
-.footer { text-align:center; margin-top:14px; font-size:11px; color:#777; line-height:1.8; }
+.footer { text-align:center; margin-top:14px; font-size:12px; font-weight:700; color:#000; line-height:1.8; }
 
 /* ── Print button (screen only) ── */
 .print-btn {

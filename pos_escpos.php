@@ -4,72 +4,76 @@
  * Generates ESC/POS commands and sends to Windows thermal printer
  * Called internally by pos_ajax.php after complete_sale
  * Can also be called directly: pos_escpos.php?sale_id=X
+ *
+ * Fixed v3.2:
+ *  - Item unit_price now converted USD → LBP correctly (was showing raw USD cents)
+ *  - Item subtotal column added (qty × unit_price in LBP)
+ *  - sendToPrinter() uses dynamic printer_name from settings (not hardcoded 'BIXOLON')
+ *  - number_format(..., 0) for all LBP amounts — no decimal places
  */
 
-// ── ESC/POS Constants ────────────────────────────────────────────────────
-define('ESC', "\x1B");
-define('GS',  "\x1D");
-define('LF',  "\x0A");
-define('INIT',        ESC . "@");           // Initialize printer
-define('BOLD_ON',     ESC . "E\x01");       // Bold on
-define('BOLD_OFF',    ESC . "E\x00");       // Bold off
-define('ALIGN_LEFT',  ESC . "a\x00");       // Left align
-define('ALIGN_CENTER',ESC . "a\x01");       // Center align
-define('ALIGN_RIGHT', ESC . "a\x02");       // Right align
-define('FONT_NORMAL', ESC . "!\x00");       // Normal size
-define('FONT_DOUBLE', ESC . "!\x11");       // Double height+width
-define('FONT_WIDE',   ESC . "!\x20");       // Double width only
-define('CUT_PAPER',   GS  . "V\x41\x00");  // Full cut
-define('FEED_3',      ESC . "d\x03");       // Feed 3 lines
+// ── ESC/POS Constants ─────────────────────────────────────────────────────
+define('ESC',         "\x1B");
+define('GS',          "\x1D");
+define('LF',          "\x0A");
+define('INIT',        ESC . "@");          // Initialize printer
+define('BOLD_ON',     ESC . "E\x01");      // Bold on
+define('BOLD_OFF',    ESC . "E\x00");      // Bold off
+define('ALIGN_LEFT',  ESC . "a\x00");      // Left align
+define('ALIGN_CENTER',ESC . "a\x01");      // Center align
+define('ALIGN_RIGHT', ESC . "a\x02");      // Right align
+define('FONT_NORMAL', ESC . "!\x00");      // Normal size
+define('FONT_DOUBLE', ESC . "!\x11");      // Double height+width
+define('FONT_WIDE',   ESC . "!\x20");      // Double width only
+define('CUT_PAPER',   GS  . "V\x41\x00"); // Full cut
 
+// ─────────────────────────────────────────────────────────────────────────────
 /**
  * Open cash drawer
  * Supports two connection types:
- * - DK/RJ11: connected to printer's DK port — opened via ESC/POS command through printer
- * - USB:     connected directly to PC USB — opened via PowerShell USB HID command
+ *  - DK/RJ11: connected to printer DK port — ESC/POS pulse through printer
+ *  - USB:     connected directly to PC — PowerShell / copy to port
  */
 function openCashDrawer($conn) {
     $co = mysqli_fetch_assoc(mysqli_query($conn,
-        "SELECT printer_name, cash_drawer, drawer_type, drawer_usb_name FROM company_settings LIMIT 1"));
+        "SELECT printer_name, cash_drawer, drawer_type, drawer_usb_name
+         FROM company_settings LIMIT 1"));
+
     $printer_name    = trim($co['printer_name']    ?? '');
     $cash_drawer     = $co['cash_drawer']           ?? 'disabled';
     $drawer_type     = $co['drawer_type']           ?? 'dk';
     $drawer_usb_name = trim($co['drawer_usb_name'] ?? '');
 
     if ($cash_drawer === 'disabled') {
-        return ['success'=>false,'error'=>'Cash drawer disabled in Settings'];
+        return ['success' => false, 'error' => 'Cash drawer disabled in Settings'];
     }
 
-    // ── DK/RJ11 drawer — via printer ESC/POS command ──────────────────────
+    // ── DK/RJ11 — send ESC/POS pulse through printer ──────────────────────
     if ($drawer_type === 'dk') {
         if (empty($printer_name)) {
-            return ['success'=>false,'error'=>'No printer name set — required for DK drawer'];
+            return ['success' => false, 'error' => 'No printer name set — required for DK drawer'];
         }
-        // ESC p pin on-time off-time
         $data  = "\x1B\x70\x00\x19\xFA"; // Pin 2 (most common)
         $data .= "\x1B\x70\x01\x19\xFA"; // Pin 5 (fallback)
         return sendToPrinter($data, $printer_name);
     }
 
-    // ── USB drawer — via Windows/PowerShell ───────────────────────────────
+    // ── USB drawer — Windows / PowerShell ────────────────────────────────
     if ($drawer_type === 'usb') {
-        // Method 1: If USB drawer has a printer port assigned — copy empty file to it
+
+        // Method 1: Named USB device
         if (!empty($drawer_usb_name)) {
             $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'drawer_' . time() . '.bin';
-            // Some USB drawers respond to any data sent to their port
             file_put_contents($tmp, "\x1B\x70\x00\x19\xFA");
             $esc = escapeshellarg($drawer_usb_name);
             $ret = -1;
             exec("copy /b " . escapeshellarg($tmp) . " {$esc} > NUL 2>&1", $out, $ret);
             @unlink($tmp);
-            if ($ret === 0) return ['success'=>true,'method'=>'usb_copy'];
+            if ($ret === 0) return ['success' => true, 'method' => 'usb_named'];
         }
 
-        // Method 2: PowerShell — open USB HID device by VID/PID or friendly name
-        // Try common USB cash drawer commands via PowerShell
-        $ps_name = !empty($drawer_usb_name) ? $drawer_usb_name : 'Cash Drawer';
+        // Method 2: PowerShell serial ports scan
         $cmd = 'powershell -Command "' .
-               '$drawer = New-Object -ComObject WScript.Shell;' .
                'Add-Type -AssemblyName System.IO.Ports;' .
                '$ports = [System.IO.Ports.SerialPort]::GetPortNames();' .
                'foreach ($p in $ports) {' .
@@ -80,333 +84,365 @@ function openCashDrawer($conn) {
                '}" > NUL 2>&1';
         $ret = -1;
         exec($cmd, $out, $ret);
-        if ($ret === 0) return ['success'=>true,'method'=>'usb_serial'];
+        if ($ret === 0) return ['success' => true, 'method' => 'usb_serial'];
 
-        // Method 3: Try USB001-USB004 directly
+        // Method 3: Try USB001–USB004 directly
         foreach (['USB001','USB002','USB003','USB004'] as $port) {
             $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'drawer_' . time() . '.bin';
             file_put_contents($tmp, "\x1B\x70\x00\x19\xFA");
             $ret = -1;
             exec("copy /b " . escapeshellarg($tmp) . " {$port} > NUL 2>&1", $out, $ret);
             @unlink($tmp);
-            if ($ret === 0) return ['success'=>true,'method'=>'usb_port:'.$port];
+            if ($ret === 0) return ['success' => true, 'method' => 'usb_port:' . $port];
         }
 
-        return ['success'=>false,'error'=>'Could not open USB drawer. Check connection and USB name in Settings.'];
+        return ['success' => false, 'error' => 'Could not open USB drawer. Check connection and USB device name in Settings.'];
     }
 
-    return ['success'=>false,'error'=>'Unknown drawer type'];
+    return ['success' => false, 'error' => 'Unknown drawer type: ' . $drawer_type];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 /**
- * Main function — build and send receipt
+ * Main receipt builder — produces ESC/POS binary and sends to printer
  */
 function printEscPos($sale_id, $conn) {
-    // Load sale
+
     $sid  = (int)$sale_id;
+
+    // ── Load sale ──────────────────────────────────────────────────────────
     $sale = mysqli_fetch_assoc(mysqli_query($conn,
         "SELECT * FROM pos_sales WHERE id = $sid LIMIT 1"));
-    if (!$sale) return ['success'=>false,'error'=>'Sale not found'];
+    if (!$sale) return ['success' => false, 'error' => 'Sale not found: #' . $sid];
 
-    // Load items
-    $items_res = mysqli_query($conn,
-        "SELECT * FROM pos_sale_items WHERE sale_id = $sid");
+    // ── Load items ─────────────────────────────────────────────────────────
     $items = [];
-    while ($r = mysqli_fetch_assoc($items_res)) $items[] = $r;
+    $res   = mysqli_query($conn, "SELECT * FROM pos_sale_items WHERE sale_id = $sid ORDER BY id ASC");
+    while ($r = mysqli_fetch_assoc($res)) $items[] = $r;
 
-    // Load company settings
-    $co = mysqli_fetch_assoc(mysqli_query($conn,
-        "SELECT * FROM company_settings LIMIT 1"));
-    $company_name   = $co['company_name']   ?? 'NCC CRM';
-    $company_phone  = $co['company_phone']  ?? '';
-    $company_address= $co['company_address']?? '';
-    $receipt_footer = $co['receipt_footer'] ?? 'Thank you for your business!';
-    $vat_rate       = (float)($co['vat_rate']    ?? 0);
-    $usd_to_lbp     = (float)($co['usd_to_lbp']  ?? 89500);
-    $printer_name   = trim($co['printer_name']    ?? '');
-    $paper_width    = $co['paper_width']           ?? '80mm';
+    // ── Load company settings ──────────────────────────────────────────────
+    $co = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM company_settings LIMIT 1"));
+    $company_name    = $co['company_name']    ?? 'NCC';
+    $company_phone   = $co['company_phone']   ?? '';
+    $company_address = $co['company_address'] ?? '';
+    $receipt_footer  = $co['receipt_footer']  ?? 'Thank you for your business!';
+    $vat_rate        = (float)($co['vat_rate']   ?? 0);     // e.g. 11  (not 0.11)
+    $usd_to_lbp      = (float)($co['usd_to_lbp'] ?? 89700);
+    $printer_name    = trim($co['printer_name']   ?? '');
+    $paper_width     = $co['paper_width']          ?? '80mm';
 
     if (empty($printer_name)) {
-        return ['success'=>false,'error'=>'No printer name set in Settings'];
+        return ['success' => false, 'error' => 'No printer name configured in Settings.'];
     }
 
-    // Paper width → character width
-    // SRP-E300 80mm = 42 chars, 58mm = 32 chars
-    $char_width = $paper_width === '58mm' ? 32 : 42;
+    // ── Character width per paper size ────────────────────────────────────
+    // SRP-E300 80mm = 42 chars | 58mm = 32 chars
+    $W = ($paper_width === '58mm') ? 32 : 42;
 
-    // Calculations — VAT = simply multiply by (1 + vat_rate/100)
-    $sym            = 'LL ';
-    $subtotal_usd   = (float)$sale['final_total'];                          // pre-VAT in USD
-    $vat_amount     = $vat_rate > 0 ? $subtotal_usd * ($vat_rate / 100) : 0; // × 0.11
-    $total_with_vat = $subtotal_usd + $vat_amount;                          // × 1.11
-    $pay_labels     = ['cash'=>'Cash','card'=>'Card','omt'=>'OMT','whish'=>'Whish',
-                       'bank_transfer'=>'Bank Transfer','cheque'=>'Cheque','credit'=>'Credit'];
+    // ── Payment label map ──────────────────────────────────────────────────
+    $pay_labels = [
+        'cash'          => 'Cash',
+        'card'          => 'Card',
+        'omt'           => 'OMT',
+        'whish'         => 'Whish',
+        'bank_transfer' => 'Bank Transfer',
+        'cheque'        => 'Cheque',
+        'credit'        => 'Credit',
+    ];
 
-    // ── Build ESC/POS data ────────────────────────────────────────────────
-    $data = INIT;
+    // ── Financial calculations (all in USD first, then → LBP) ─────────────
+    $subtotal_usd    = (float)$sale['final_total'];                           // pre-VAT, pre-discount, USD
+    $vat_amount_usd  = $vat_rate > 0 ? $subtotal_usd * ($vat_rate / 100) : 0;
+    $total_vat_usd   = $subtotal_usd + $vat_amount_usd;                      // incl. VAT, USD
 
-    // ── Header ─────────────────────────────────────────────────────────
-    $data .= ALIGN_CENTER;
-    $data .= BOLD_ON . FONT_DOUBLE . substr($company_name, 0, 20) . LF . FONT_NORMAL . BOLD_OFF;
-    $data .= 'Sale Receipt' . LF;
-    $data .= date('d M Y, H:i', strtotime($sale['created_at'])) . LF;
-    if ($company_phone)   $data .= $company_phone . LF;
-    if ($company_address) $data .= wordwrap($company_address, $char_width, LF, true) . LF;
-    $data .= str_repeat('-', $char_width) . LF;
+    $lbp_subtotal    = round($subtotal_usd  * $usd_to_lbp);
+    $lbp_vat         = round($vat_amount_usd * $usd_to_lbp);
+    $lbp_exact       = round($total_vat_usd  * $usd_to_lbp);                 // exact LBP before rounding
+    $lbp_due         = round($lbp_exact / 5000) * 5000;                      // nearest LL 5,000
+    $lbp_rounding    = $lbp_due - $lbp_exact;                                // negative = store absorbs
 
-    // ── Sale info ──────────────────────────────────────────────────────
-    $data .= ALIGN_LEFT;
-    $data .= twoCol('Sale #',    '#' . $sale['id'], $char_width) . LF;
-    $data .= twoCol('Customer',  substr($sale['client_name'], 0, $char_width - 10), $char_width) . LF;
-    $data .= twoCol('Cashier',   $sale['agent_name'], $char_width) . LF;
-    $data .= twoCol('Payment',   $pay_labels[$sale['payment_method']] ?? $sale['payment_method'], $char_width) . LF;
-    $data .= twoCol('Currency',  $sale['currency'], $char_width) . LF;
+    // ── Start building ESC/POS data ────────────────────────────────────────
+    $d = INIT;
 
+    // ════════════════════════════════════════════════
+    // HEADER
+    // ════════════════════════════════════════════════
+    $d .= ALIGN_CENTER;
+    $d .= BOLD_ON . FONT_DOUBLE . mb_substr($company_name, 0, 20) . LF . FONT_NORMAL . BOLD_OFF;
+    if ($company_address) $d .= wordwrap($company_address, $W, LF, true) . LF;
+    if ($company_phone)   $d .= 'Tel: ' . $company_phone . LF;
+    $d .= BOLD_ON . 'SALE RECEIPT' . LF . BOLD_OFF;
+    $d .= date('d M Y H:i:s', strtotime($sale['created_at'])) . LF;
+    $d .= str_repeat('-', $W) . LF;
+
+    // ════════════════════════════════════════════════
+    // SALE INFO
+    // ════════════════════════════════════════════════
+    $d .= ALIGN_LEFT;
+    $d .= twoCol('Sale #',    '#' . $sale['id'],                                            $W) . LF;
+    $d .= twoCol('Customer',  mb_substr($sale['client_name'] ?? 'Walk-in', 0, $W - 10),    $W) . LF;
+    $d .= twoCol('Cashier',   $sale['agent_name'] ?? '',                                    $W) . LF;
+    $d .= twoCol('Payment',   $pay_labels[$sale['payment_method']] ?? $sale['payment_method'], $W) . LF;
+
+    // Refunded stamp
     if ($sale['status'] === 'refunded') {
-        $data .= str_repeat('-', $char_width) . LF;
-        $data .= ALIGN_CENTER . BOLD_ON . '** REFUNDED **' . LF . BOLD_OFF . ALIGN_LEFT;
+        $d .= str_repeat('-', $W) . LF;
+        $d .= ALIGN_CENTER . BOLD_ON . '** REFUNDED **' . LF . BOLD_OFF . ALIGN_LEFT;
     }
 
-    // ── Items ──────────────────────────────────────────────────────────
-    $data .= str_repeat('-', $char_width) . LF;
-    $data .= BOLD_ON . 'ITEMS' . LF . BOLD_OFF;
-    $data .= str_repeat('-', $char_width) . LF;
+    // ════════════════════════════════════════════════
+    // ITEMS TABLE
+    // Column layout (42 chars):
+    //   Name      : left,  max 18 chars
+    //   Qty       : right, 4 chars
+    //   Unit LBP  : right, 10 chars
+    //   Sub LBP   : right, 10 chars
+    //   Total     : 18+4+10+10 = 42
+    // (58mm 32 chars: 10+4+9+9 = 32)
+    // ════════════════════════════════════════════════
+    $d .= str_repeat('-', $W) . LF;
 
+    // Column widths
+    $col_qty  = 4;
+    $col_unit = ($W === 42) ? 10 : 9;
+    $col_sub  = ($W === 42) ? 10 : 9;
+    $col_name = $W - $col_qty - $col_unit - $col_sub; // 42 → 18 | 32 → 10
+
+    // Header row
+    $hdr_name = str_pad('PRODUCT', $col_name);
+    $hdr_qty  = str_pad('QTY',  $col_qty,  ' ', STR_PAD_LEFT);
+    $hdr_unit = str_pad('UNIT', $col_unit, ' ', STR_PAD_LEFT);
+    $hdr_sub  = str_pad('SUB',  $col_sub,  ' ', STR_PAD_LEFT);
+    $d .= BOLD_ON . $hdr_name . $hdr_qty . $hdr_unit . $hdr_sub . LF . BOLD_OFF;
+    $d .= str_repeat('-', $W) . LF;
+
+    // Item rows — FIX: unit_price stored in USD → convert to LBP
     foreach ($items as $item) {
-        $price_str = $sym . number_format($item['unit_price'], 2);
-        $qty_str   = 'x' . $item['qty'];
-        // Fixed width: qty (4 chars) + price (8 chars) = 12 chars right block
-        $right = sprintf('%3s %8s', $qty_str, $price_str);
-        $name  = mb_substr($item['product_name'], 0, $char_width - 13);
-        $pad   = $char_width - mb_strlen($name) - mb_strlen($right);
-        $data .= $name . str_repeat(' ', max(1, $pad)) . $right . LF;
+        $unit_lbp = round((float)$item['unit_price'] * $usd_to_lbp);
+        $sub_lbp  = round($unit_lbp * (int)$item['qty']);
+
+        $name_cell = mb_substr($item['product_name'], 0, $col_name);
+        $name_cell = str_pad($name_cell, $col_name); // pad to column width
+
+        $qty_cell  = str_pad((string)(int)$item['qty'],                $col_qty,  ' ', STR_PAD_LEFT);
+        $unit_cell = str_pad(number_format($unit_lbp, 0),             $col_unit, ' ', STR_PAD_LEFT);
+        $sub_cell  = str_pad(number_format($sub_lbp,  0),             $col_sub,  ' ', STR_PAD_LEFT);
+
+        $d .= $name_cell . $qty_cell . $unit_cell . $sub_cell . LF;
     }
 
-    // ── Totals ─────────────────────────────────────────────────────────
-    $note         = 5000;
-    $lbp_subtotal = round($subtotal_usd   * $usd_to_lbp);
-    $lbp_taxable  = round($subtotal_usd   * $usd_to_lbp);
-    $lbp_vat      = round($vat_amount     * $usd_to_lbp);
-    $lbp_exact    = round($total_with_vat * $usd_to_lbp);  // exact before rounding
-    $lbp_due      = round($lbp_exact / $note) * $note;      // rounded total due
-    $lbp_rounding = $lbp_due - $lbp_exact;                  // + = rounded up, - = rounded down
-
-    $data .= str_repeat('-', $char_width) . LF;
-    $data .= twoCol('Subtotal', 'LL ' . number_format($lbp_subtotal, 0), $char_width) . LF;
-
-    if ($sale['discount'] > 0) {
-        $data .= twoCol('Discount', '-LL ' . number_format(round($sale['discount'] * $usd_to_lbp), 0), $char_width) . LF;
-    }
-
-    $data .= str_repeat('-', $char_width) . LF;
+    // ════════════════════════════════════════════════
+    // TOTALS
+    // ════════════════════════════════════════════════
+    $d .= str_repeat('-', $W) . LF;
 
     if ($vat_rate > 0) {
-        $data .= BOLD_ON . twoCol('TOTAL excl.VAT', 'LL ' . number_format($lbp_taxable, 0), $char_width) . LF . BOLD_OFF;
-        $data .= twoCol('VAT (' . $vat_rate . '%)', 'LL ' . number_format($lbp_vat, 0), $char_width) . LF;
-        $data .= str_repeat('-', $char_width) . LF;
-        $data .= BOLD_ON . twoCol('TOTAL exact', 'LL ' . number_format($lbp_exact, 0), $char_width) . LF . BOLD_OFF;
+        $d .= twoCol('TOTAL excl. VAT', 'LL ' . number_format($lbp_subtotal, 0), $W) . LF;
+        $d .= twoCol('VAT (' . rtrim(rtrim(number_format($vat_rate, 2),'0'),'.') . '%)',
+                     'LL ' . number_format($lbp_vat, 0), $W) . LF;
+        $d .= str_repeat('-', $W) . LF;
+        $d .= twoCol('TOTAL exact', 'LL ' . number_format($lbp_exact, 0), $W) . LF;
     } else {
-        $data .= BOLD_ON . twoCol('TOTAL exact', 'LL ' . number_format($lbp_exact, 0), $char_width) . LF . BOLD_OFF;
+        $d .= twoCol('TOTAL exact', 'LL ' . number_format($lbp_exact, 0), $W) . LF;
     }
+
+    // Show rounding only when store absorbs (negative value)
     if ($lbp_rounding < 0) {
-        $data .= twoCol('Rounding', 'LL ' . number_format($lbp_rounding, 0), $char_width) . LF;
+        $d .= twoCol('Rounding', 'LL ' . number_format($lbp_rounding, 0), $W) . LF;
     }
-    $data .= str_repeat('-', $char_width) . LF;
-    $data .= BOLD_ON . twoCol('TOTAL DUE', 'LL ' . number_format($lbp_due, 0), $char_width) . LF . BOLD_OFF;
 
-    // ── USD equivalent ─────────────────────────────────────────────────
+    $d .= str_repeat('-', $W) . LF;
+    $d .= BOLD_ON . twoCol('TOTAL DUE', 'LL ' . number_format($lbp_due, 0), $W) . LF . BOLD_OFF;
+
+    // ── Discount line (shown under totals if applicable) ───────────────────
+    if ((float)($sale['discount'] ?? 0) > 0) {
+        $disc_lbp = round((float)$sale['discount'] * $usd_to_lbp);
+        $d .= twoCol('Discount applied', '-LL ' . number_format($disc_lbp, 0), $W) . LF;
+    }
+
+    // ── USD equivalent box ─────────────────────────────────────────────────
     if ($usd_to_lbp > 0) {
-        $data .= str_repeat('-', $char_width) . LF;
-        $data .= ALIGN_CENTER;
-        $data .= 'Exchange rate: 1 USD = ' . number_format($usd_to_lbp, 0) . ' LBP' . LF;
-        $data .= '$ ' . number_format($total_with_vat, 2) . ' USD equivalent' . LF;
-        $data .= ALIGN_LEFT;
+        $d .= str_repeat('-', $W) . LF;
+        $d .= ALIGN_CENTER;
+        $d .= '$ ' . number_format($total_vat_usd, 2) . LF;
+        $d .= 'USD equivalent' . LF;
+        $d .= '1 USD = ' . number_format($usd_to_lbp, 0) . ' LBP' . LF;
+        $d .= ALIGN_LEFT;
     }
 
-    // ── Payment details (cash only) ────────────────────────────────────────
-    if ($sale['payment_method'] === 'cash' &&
-        ((float)($sale['paid_usd']??0) > 0 || (float)($sale['paid_lbp']??0) > 0)) {
-        $total_paid_lbp = (float)($sale['paid_lbp']??0) + round((float)($sale['paid_usd']??0) * $usd_to_lbp);
-        $net_lbp        = $total_paid_lbp - $lbp_due;
-        $chg_usd        = (float)($sale['change_usd']??0);
-        $chg_lbp        = (float)($sale['change_lbp']??0);
-        $has_change     = $chg_usd > 0 || $chg_lbp > 0;
-        $data .= str_repeat('-', $char_width) . LF;
-        if ((float)($sale['paid_lbp']??0) > 0)
-            $data .= twoCol('Paid LBP:', 'LL ' . number_format($sale['paid_lbp'], 0), $char_width) . LF;
-        if ((float)($sale['paid_usd']??0) > 0)
-            $data .= twoCol('Paid USD:', '$ ' . number_format($sale['paid_usd'], 0), $char_width) . LF;
+    // ════════════════════════════════════════════════
+    // PAYMENT DETAILS (cash sales only)
+    // ════════════════════════════════════════════════
+    $paid_lbp = (float)($sale['paid_lbp'] ?? 0);
+    $paid_usd = (float)($sale['paid_usd'] ?? 0);
+    $chg_usd  = (float)($sale['change_usd'] ?? 0);
+    $chg_lbp  = (float)($sale['change_lbp'] ?? 0);
+
+    if ($sale['payment_method'] === 'cash' && ($paid_lbp > 0 || $paid_usd > 0)) {
+        $d .= str_repeat('-', $W) . LF;
+        $d .= BOLD_ON . 'PAYMENT DETAILS' . LF . BOLD_OFF;
+
+        if ($paid_lbp > 0)
+            $d .= twoCol('Paid LBP', 'LL ' . number_format($paid_lbp, 0), $W) . LF;
+        if ($paid_usd > 0)
+            $d .= twoCol('Paid USD', '$ '  . number_format($paid_usd, 2), $W) . LF;
+
+        $has_change = $chg_usd > 0 || $chg_lbp > 0;
         if ($has_change) {
-            // Change: USD bills + LBP remainder
             if ($chg_usd > 0 && $chg_lbp > 0) {
-                $data .= BOLD_ON . twoCol('Change (USD):', '$ ' . number_format($chg_usd, 0), $char_width) . LF . BOLD_OFF;
-                $data .= BOLD_ON . twoCol('Change (LBP):', 'LL ' . number_format($chg_lbp, 0), $char_width) . LF . BOLD_OFF;
+                // Split change
+                $d .= BOLD_ON . twoCol('Change (USD)', '$ '  . number_format($chg_usd, 0), $W) . LF . BOLD_OFF;
+                $d .= BOLD_ON . twoCol('Change (LBP)', 'LL ' . number_format($chg_lbp, 0), $W) . LF . BOLD_OFF;
             } elseif ($chg_usd > 0) {
-                $data .= BOLD_ON . twoCol('Change:', '$ ' . number_format($chg_usd, 0), $char_width) . LF . BOLD_OFF;
+                $d .= BOLD_ON . twoCol('Change', '$ '  . number_format($chg_usd, 0), $W) . LF . BOLD_OFF;
             } else {
-                $data .= BOLD_ON . twoCol('Change:', 'LL ' . number_format($chg_lbp, 0), $char_width) . LF . BOLD_OFF;
+                $d .= BOLD_ON . twoCol('Change', 'LL ' . number_format($chg_lbp, 0), $W) . LF . BOLD_OFF;
             }
-        } elseif ($net_lbp < 0) {
-            $data .= BOLD_ON . twoCol('Remaining:', 'LL ' . number_format(abs($net_lbp), 0), $char_width) . LF . BOLD_OFF;
         } else {
-            // Show rounding only when store absorbs (negative)
-            $disp = ($net_lbp != 0) ? $net_lbp : $lbp_rounding;
-            if ($disp < 0) {
-                $data .= twoCol('Rounding:', 'LL ' . number_format($disp, 0), $char_width) . LF;
+            // Fallback: compute net from paid amounts
+            $total_paid_lbp = $paid_lbp + round($paid_usd * $usd_to_lbp);
+            $net_lbp        = $total_paid_lbp - $lbp_due;
+            if ($net_lbp > 0) {
+                $d .= BOLD_ON . twoCol('Change', 'LL ' . number_format($net_lbp, 0), $W) . LF . BOLD_OFF;
+            } elseif ($net_lbp < 0) {
+                $d .= BOLD_ON . twoCol('Remaining', 'LL ' . number_format(abs($net_lbp), 0), $W) . LF . BOLD_OFF;
             }
         }
     }
 
-    // ── Footer ─────────────────────────────────────────────────────────
-    $data .= str_repeat('-', $char_width) . LF;
-    $data .= ALIGN_CENTER;
-    $data .= $receipt_footer . LF;
-    $data .= $company_name . ' - ' . date('Y') . LF;
+    // ════════════════════════════════════════════════
+    // FOOTER
+    // ════════════════════════════════════════════════
+    $d .= str_repeat('-', $W) . LF;
+    $d .= ALIGN_CENTER;
+    $footer_clean = str_replace(['—', '–', "\xe2\x80\x94", "\xe2\x80\x93"], '-', $receipt_footer);
+    $d .= $footer_clean . LF;
+    $d .= $company_name . ' - ' . date('Y') . LF;
 
-    // Feed 4 lines before cut so last line clears the cutter
-    $data .= ESC . "d\x04";
-    $data .= CUT_PAPER;
+    // Feed 4 lines so last line clears cutter blade, then cut
+    $d .= ESC . "d\x04";
+    $d .= CUT_PAPER;
 
-    // ── Send to printer ───────────────────────────────────────────────────
-    return sendToPrinter($data, $printer_name);
+    return sendToPrinter($d, $printer_name);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 /**
- * Send raw ESC/POS data to Windows printer
+ * Send raw ESC/POS bytes to Windows printer
+ * Tries 5 methods in order, returns first success.
+ * Uses dynamic $printer_name from company_settings (not hardcoded).
  */
 function sendToPrinter($data, $printer_name) {
-    // Write to a temp file
-    $tmp_file = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'pos_receipt_' . time() . '.bin';
+    $tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'pos_receipt_' . time() . mt_rand(100,999) . '.bin';
 
-    if (file_put_contents($tmp_file, $data) === false) {
-        return ['success'=>false,'error'=>'Could not write temp file: ' . sys_get_temp_dir()];
+    if (file_put_contents($tmp, $data) === false) {
+        return ['success' => false, 'error' => 'Cannot write temp file to: ' . sys_get_temp_dir()];
     }
 
-    $file_escaped = escapeshellarg($tmp_file);
+    $f      = escapeshellarg($tmp);
     $errors = [];
 
-    // Method 1: Network share — most reliable when Apache runs as SYSTEM
-    $share = '\\\\localhost\\BIXOLON';
-    $share_escaped = escapeshellarg($share);
-    $cmd = "copy /b {$file_escaped} {$share_escaped} > NUL 2>&1";
+    // ── Method 1: \\localhost\<share> with correct quoting (handles spaces) ──
+    $share     = '\\\\localhost\\' . $printer_name;
+    $share_esc = '"' . $share . '"';
     $ret = -1;
-    exec($cmd, $out, $ret);
-    if ($ret === 0) {
-        @unlink($tmp_file);
-        return ['success'=>true,'method'=>'share:BIXOLON'];
-    }
-    $errors[] = "Share BIXOLON failed (ret=$ret)";
+    exec("copy /b {$f} {$share_esc} > NUL 2>&1", $out, $ret);
+    if ($ret === 0) { @unlink($tmp); return ['success' => true, 'method' => 'share:' . $printer_name]; }
+    $errors[] = "share({$printer_name}) ret={$ret}";
 
-    // Method 2: Printer name via copy /b
-    $printer_escaped = escapeshellarg($printer_name);
-    $cmd = "copy /b {$file_escaped} {$printer_escaped} > NUL 2>&1";
+    // ── Method 2: Printer name directly (works when share = printer name) ────
+    $pn_esc = escapeshellarg($printer_name);
     $ret = -1;
-    exec($cmd, $out, $ret);
-    if ($ret === 0) {
-        @unlink($tmp_file);
-        return ['success'=>true,'method'=>'printer_name'];
-    }
-    $errors[] = "Printer name failed (ret=$ret)";
+    exec("copy /b {$f} {$pn_esc} > NUL 2>&1", $out, $ret);
+    if ($ret === 0) { @unlink($tmp); return ['success' => true, 'method' => 'printer_name']; }
+    $errors[] = "printer_name ret={$ret}";
 
-    // Method 3: Direct USB ports
+    // ── Method 3: Direct USB ports USB001–USB004 ──────────────────────────
     foreach (['USB001','USB002','USB003','USB004'] as $port) {
-        $cmd = "copy /b {$file_escaped} {$port} > NUL 2>&1";
         $ret = -1;
-        exec($cmd, $out, $ret);
-        if ($ret === 0) {
-            @unlink($tmp_file);
-            return ['success'=>true,'method'=>'usb_port:'.$port];
-        }
-        $errors[] = "USB port $port failed (ret=$ret)";
+        exec("copy /b {$f} {$port} > NUL 2>&1", $out, $ret);
+        if ($ret === 0) { @unlink($tmp); return ['success' => true, 'method' => 'usb:' . $port]; }
+        $errors[] = "{$port} ret={$ret}";
     }
 
-    // Method 4: PowerShell via shared queue
-    $cmd = 'powershell -Command "Get-Content -Encoding Byte -Path \'' . $tmp_file . '\' | Out-Printer -Name \'' . $printer_name . '\'" > NUL 2>&1';
+    // ── Method 4: PowerShell Out-Printer ─────────────────────────────────
+    $pn_ps = str_replace("'", "''", $printer_name);
+    $tp_ps = str_replace("'", "''", $tmp);
+    $cmd   = "powershell -Command \"Get-Content -Encoding Byte -Path '{$tp_ps}' | Out-Printer -Name '{$pn_ps}'\" > NUL 2>&1";
+    $ret   = -1;
+    exec($cmd, $out, $ret);
+    if ($ret === 0) { @unlink($tmp); return ['success' => true, 'method' => 'powershell']; }
+    $errors[] = "powershell ret={$ret}";
+
+    // ── Method 5: Windows print command ──────────────────────────────────
+    $cmd = 'print /D:"' . $printer_name . '" "' . $tmp . '" > NUL 2>&1';
     $ret = -1;
     exec($cmd, $out, $ret);
-    if ($ret === 0) {
-        @unlink($tmp_file);
-        return ['success'=>true,'method'=>'powershell_queue'];
-    }
-    $errors[] = "PowerShell queue failed (ret=$ret)";
+    if ($ret === 0) { @unlink($tmp); return ['success' => true, 'method' => 'win_print']; }
+    $errors[] = "win_print ret={$ret}";
 
-    // Method 5: Windows print command
-    $cmd = 'print /D:"' . $printer_name . '" "' . $tmp_file . '" > NUL 2>&1';
-    $ret = -1;
-    exec($cmd, $out, $ret);
-    if ($ret === 0) {
-        @unlink($tmp_file);
-        return ['success'=>true,'method'=>'windows_print'];
-    }
-    $errors[] = "Windows print failed (ret=$ret)";
-
-    @unlink($tmp_file);
-
+    @unlink($tmp);
     return [
         'success' => false,
-        'error'   => 'Could not reach printer. Tried: USB001-USB004, printer name, network share. Details: ' . implode(' | ', $errors),
+        'error'   => 'All print methods failed. Details: ' . implode(' | ', $errors),
     ];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 /**
- * Two-column row helper — left text + right text aligned
+ * Two-column row: left text flush-left, right text flush-right, total = $width
  */
 function twoCol($left, $right, $width) {
-    $left  = mb_substr($left, 0, $width - mb_strlen($right) - 1);
-    $pad   = $width - mb_strlen($left) - mb_strlen($right);
+    $left = mb_substr($left, 0, $width - mb_strlen($right) - 1);
+    $pad  = $width - mb_strlen($left) - mb_strlen($right);
     return $left . str_repeat(' ', max(1, $pad)) . $right;
 }
 
-/**
- * Center a string within width
- */
-function mbStr($str, $width) {
-    $len = mb_strlen($str);
-    if ($len >= $width) return $str;
-    $pad = intval(($width - $len) / 2);
-    return str_repeat(' ', $pad) . $str;
-}
-
-// ── If called directly ────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Entry point when called directly via HTTP
+// ─────────────────────────────────────────────────────────────────────────────
 if (isset($_GET['sale_id']) || isset($_GET['action'])) {
+
     session_start();
     header('Content-Type: application/json');
-    if (empty($_SESSION['oop'])) {
-        echo json_encode(['success'=>false,'error'=>'Not authenticated']); exit();
-    }
-    $conn = mysqli_connect("192.168.1.101","root","1Sys9Admeen72","nccleb_test");
-    mysqli_set_charset($conn,'utf8mb4');
 
-    // Open cash drawer manually
+    if (empty($_SESSION['oop'])) {
+        echo json_encode(['success' => false, 'error' => 'Not authenticated']); exit();
+    }
+
+    $conn = mysqli_connect("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+    if (!$conn) {
+        echo json_encode(['success' => false, 'error' => 'DB connection failed: ' . mysqli_connect_error()]); exit();
+    }
+    mysqli_set_charset($conn, 'utf8mb4');
+
+    // ── Cash drawer manual trigger ─────────────────────────────────────────
     if (($_GET['action'] ?? '') === 'open_drawer') {
         echo json_encode(openCashDrawer($conn));
         mysqli_close($conn);
         exit();
     }
 
-    // Check exec() is available
-    $disabled = explode(',', ini_get('disable_functions'));
-    $disabled = array_map('trim', $disabled);
+    // ── Check exec() is available ──────────────────────────────────────────
+    $disabled = array_map('trim', explode(',', ini_get('disable_functions')));
     if (in_array('exec', $disabled)) {
         echo json_encode([
             'success' => false,
-            'error'   => 'exec() is disabled in PHP. Go to WAMP → PHP → php.ini → find disable_functions → remove "exec" → restart WAMP.'
-        ]);
-        exit();
+            'error'   => 'exec() is disabled in PHP. Fix: WAMP tray -> PHP -> php.ini -> find disable_functions -> remove "exec" -> restart WAMP.',
+        ]); exit();
     }
 
-    // Resolve sale ID
+    // ── Resolve sale ID ────────────────────────────────────────────────────
     $sid_raw = $_GET['sale_id'] ?? '';
     if ($sid_raw === 'latest') {
-        $row = mysqli_fetch_assoc(mysqli_query($conn, "SELECT id FROM pos_sales ORDER BY id DESC LIMIT 1"));
+        $row     = mysqli_fetch_assoc(mysqli_query($conn, "SELECT id FROM pos_sales ORDER BY id DESC LIMIT 1"));
         $sale_id = $row ? (int)$row['id'] : 0;
     } else {
         $sale_id = (int)$sid_raw;
     }
 
     if (!$sale_id) {
-        echo json_encode(['success'=>false,'error'=>'No sales found in database.']);
-        exit();
+        echo json_encode(['success' => false, 'error' => 'No valid sale ID provided.']); exit();
     }
 
     $result = printEscPos($sale_id, $conn);
