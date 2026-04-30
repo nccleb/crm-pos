@@ -112,6 +112,9 @@ tr:hover td { background:#fafafa; }
     <h1>Sales History</h1>
     <a class="ml" href="pos.php"><i class="fas fa-cash-register"></i> POS</a>
     <a href="pos_products.php"><i class="fas fa-box"></i> Products</a>
+    <a href="pos_receiving.php"><i class="fas fa-truck-loading"></i> Receiving</a>
+    <a href="pos_expiry.php"><i class="fas fa-calendar-times"></i> Expiry</a>
+    <a href="pos_suppliers.php"><i class="fas fa-building"></i> Suppliers</a>
     <a href="pos_closing.php"><i class="fas fa-cash-register"></i> Closing</a>
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
     <a href="test204.php?page=<?= urlencode($agent_name) ?>&page1=<?= $agent_id ?>"><i class="fas fa-arrow-left"></i> CRM</a>

@@ -284,6 +284,9 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
     <a href="pos_sales.php"><i class="fas fa-history"></i> Sales History</a>
     <a href="pos_products.php"><i class="fas fa-box"></i> Products</a>
     <a href="pos_stock.php"><i class="fas fa-boxes"></i> Stock</a>
+    <a href="pos_receiving.php"><i class="fas fa-truck-loading"></i> Receiving</a>
+    <a href="pos_suppliers.php"><i class="fas fa-building"></i> Suppliers</a>
+    <a href="pos_expiry.php"><i class="fas fa-calendar-times"></i> Expiry</a>
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
     <?php if ($agent_name === 'super'): ?>
     <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
