@@ -286,7 +286,6 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
     <a href="pos_stock.php"><i class="fas fa-boxes"></i> Stock</a>
     <a href="pos_receiving.php"><i class="fas fa-truck-loading"></i> Receiving</a>
     <a href="pos_suppliers.php"><i class="fas fa-building"></i> Suppliers</a>
-    <a href="pos_expiry.php"><i class="fas fa-calendar-times"></i> Expiry</a>
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
     <?php if ($agent_name === 'super'): ?>
     <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
@@ -586,43 +585,60 @@ function loadProducts(query, category, autoAdd, showAll) {
             var filtered = data.data; // Already filtered by DB
             document.getElementById('productsCount').textContent = filtered.length + ' product' + (filtered.length !== 1 ? 's' : '');
 
-            // Barcode scanner: if Enter was pressed and exactly 1 result — add to cart automatically
+            // Barcode scanner: if Enter was pressed and exactly 1 result
             if (autoAdd && filtered.length === 1) {
                 var p = filtered[0];
-                if (parseInt(p.onhand) > 0) {
-                    addToCart(p.codep, p.nomp, Math.round(parseFloat(p.price) * USD_TO_LBP));
-                    searchInput.value = '';
-                    // Flash green feedback
-                    searchInput.style.borderColor = '#10b981';
-                    setTimeout(function() { searchInput.style.borderColor = ''; }, 600);
-                    // Reload all products and refocus
-                    loadProducts('', currentCategory, false, true);
-                    searchInput.focus();
-                    return;
+                var lbpPriceA = Math.round(parseFloat(p.price));  // price stored as LBP
+                if (p.is_weighted == 1) {
+                    openWeightModal(p.codep, p.nomp, lbpPriceA, p.unit || 'kg');
+                } else if (parseInt(p.onhand) > 0) {
+                    addToCart(p.codep, p.nomp, lbpPriceA, false, p.unit || 'pc');
                 }
+                searchInput.value = '';
+                searchInput.style.borderColor = '#10b981';
+                setTimeout(function() { searchInput.style.borderColor = ''; }, 600);
+                loadProducts('', currentCategory, false, true);
+                searchInput.focus();
+                return;
             }
             grid.innerHTML = filtered.map(p => {
-                var stock = parseInt(p.onhand), outOfStock = stock <= 0, lowStock = stock > 0 && stock <= 5;
+                var stock = parseFloat(p.onhand);
+                var outOfStock = !p.is_weighted && stock <= 0;
+                var lowStock   = !p.is_weighted && stock > 0 && stock <= 5;
                 var cat = p.category || 'default';
                 var dotColor = catColors[cat] || catColors['default'];
                 var icon     = catIcons[cat]  || catIcons['default'];
-                var stockClass = outOfStock ? 'stock-out' : (lowStock ? 'stock-low' : 'stock-ok');
-                var stockText  = outOfStock ? '✕ Out of stock' : (lowStock ? '⚠ ' + stock + ' left' : stock + ' in stock');
-                var lbpPrice = Math.round(parseFloat(p.price) * USD_TO_LBP);
-                var clickFn = outOfStock ? '' : 'addToCart(' + p.codep + ',\'' + escJs(p.nomp) + '\',' + lbpPrice + ')';
+                var lbpPrice = Math.round(parseFloat(p.price));  // price stored as LBP
+                var unit = p.unit || (p.is_weighted ? 'kg' : 'pc');
+
+                var stockClass, stockText, clickFn, priceLabel, weightBadge = '';
+                if (p.is_weighted == 1) {
+                    stockClass  = 'stock-ok';
+                    stockText   = stock > 0 ? '⚖ ' + stock + ' ' + unit + ' left' : '⚖ Weigh item';
+                    priceLabel  = 'LL ' + lbpPrice.toLocaleString() + ' / ' + unit;
+                    clickFn     = 'openWeightModal(' + p.codep + ',' + JSON.stringify(p.nomp) + ',' + lbpPrice + ',' + JSON.stringify(unit) + ')';
+                    weightBadge = '<span style=\'position:absolute;top:5px;right:5px;background:#7c3aed;color:#fff;font-size:9px;font-weight:800;padding:2px 6px;border-radius:10px;\'>⚖ KG</span>';
+                } else {
+                    stockClass = outOfStock ? 'stock-out' : (lowStock ? 'stock-low' : 'stock-ok');
+                    stockText  = outOfStock ? '✗ Out of stock' : (lowStock ? '⚠ ' + stock + ' left' : stock + ' in stock');
+                    priceLabel = 'LL ' + lbpPrice.toLocaleString();
+                    clickFn    = outOfStock ? '' : 'addToCart(' + p.codep + ',' + JSON.stringify(p.nomp) + ',' + lbpPrice + ',false,' + JSON.stringify(unit) + ')';
+                    weightBadge = '';
+                }
 
                 var imgHtml = p.image
-                    ? '<img src="uploads/products/' + p.image + '" style="width:54px;height:54px;object-fit:cover;border-radius:10px;" onerror="this.style.display=\'none\'">'
-                    : '<i class="fas ' + icon + '" style="font-size:22px;color:' + dotColor + ';"></i>';
+                    ? '<img src=\'uploads/products/' + p.image + '\' style=\'width:54px;height:54px;object-fit:cover;border-radius:10px;\' onerror=\'this.style.display="none"\'>'
+                    : '<i class=\'fas ' + icon + '\' style=\'font-size:22px;color:' + dotColor + ';\'></i>';
 
-                return '<div class="product-card' + (outOfStock ? ' out-of-stock' : '') + '" onclick="' + clickFn + '">' +
-                    '<div class="card-top">' +
-                        '<div class="icon" style="background:' + dotColor + '18;">' + imgHtml + '</div>' +
-                        '<div class="name">' + escHtml(p.nomp) + '</div>' +
+                return '<div class=\'product-card' + (outOfStock ? ' out-of-stock' : '') + '\' style=\'position:relative;\' onclick=\'' + clickFn + '\'>' +
+                    weightBadge +
+                    '<div class=\'card-top\'>' +
+                        '<div class=\'icon\' style=\'background:' + dotColor + '18;\'>' + imgHtml + '</div>' +
+                        '<div class=\'name\'>' + escHtml(p.nomp) + '</div>' +
                     '</div>' +
-                    '<div class="card-bottom">' +
-                        '<span class="price">LL ' + Math.round(parseFloat(p.price) * USD_TO_LBP).toLocaleString() + '</span>' +
-                        '<span class="stock-pill ' + stockClass + '">' + stockText + '</span>' +
+                    '<div class=\'card-bottom\'>' +
+                        '<span class=\'price\'>' + priceLabel + '</span>' +
+                        '<span class=\'stock-pill ' + stockClass + '\'>' + stockText + '</span>' +
                     '</div>' +
                 '</div>';
             }).join('');
@@ -674,48 +690,93 @@ document.querySelectorAll('.cat-btn').forEach(btn => {
 });
 
 // ── Cart ──────────────────────────────────────────────────────────────────
-function addToCart(productId, productName, unitPrice) {
-    var existing = cart.find(i => i.product_id === productId);
-    if (existing) { existing.qty++; } else {
-        cart.push({ product_id: productId, product_name: productName, unit_price: parseFloat(unitPrice), qty: 1 });
+function addToCart(productId, productName, unitPrice, isWeighted, unit) {
+    if (isWeighted) {
+        // Weighted items — never merge, always a new line (each weighing is unique)
+        return; // should be called via addWeightedToCart instead
     }
+    var existing = cart.find(i => i.product_id === productId && !i.is_weighted);
+    if (existing) { existing.qty++; } else {
+        cart.push({ product_id: productId, product_name: productName,
+                    unit_price: parseFloat(unitPrice), qty: 1,
+                    is_weighted: false, unit: unit || 'pc' });
+    }
+    renderCart();
+}
+
+function addWeightedToCart(productId, productName, unitPrice, weightKg, unit) {
+    // Each weighing is its own cart line
+    cart.push({ product_id: productId, product_name: productName,
+                unit_price: parseFloat(unitPrice), qty: weightKg,
+                is_weighted: true, unit: unit || 'kg' });
     renderCart();
 }
 
 function renderCart() {
     var container = document.getElementById('cartItems');
-    var count = cart.reduce((s, i) => s + i.qty, 0);
-    document.getElementById('cartCount').textContent        = count;
-    document.getElementById('itemCountDisplay').textContent = count;
+    var count = cart.reduce((s, i) => s + (i.is_weighted ? 1 : i.qty), 0);
+    document.getElementById('cartCount').textContent        = cart.length;
+    document.getElementById('itemCountDisplay').textContent = cart.length;
     document.getElementById('chargeBtn').disabled = cart.length === 0;
 
     if (cart.length === 0) {
         container.innerHTML = '<div class="cart-empty"><i class="fas fa-shopping-cart"></i><p>Cart is empty</p><p style="font-size:12px;margin-top:4px;">Click products to add them</p></div>';
         updateTotals(); return;
     }
-    container.innerHTML = cart.map((item, idx) =>
-        '<div class="cart-item">' +
-            '<div class="cart-item-top">' +
-                '<div class="item-name">' + escHtml(item.product_name) + '</div>' +
-                '<div class="item-unit-price">LL ' + Math.round(item.unit_price).toLocaleString() + ' / unit</div>' +
-            '</div>' +
-            '<div class="cart-item-bottom">' +
-                '<div class="qty-control">' +
-                    '<button class="qty-btn" onclick="changeQty(' + idx + ',-1)">−</button>' +
-                    '<input class="qty-input" type="number" value="' + item.qty + '" min="1" onchange="setQty(' + idx + ',this.value)">' +
-                    '<button class="qty-btn" onclick="changeQty(' + idx + ',1)">+</button>' +
-                    '<button class="qty-btn remove" onclick="removeItem(' + idx + ')" title="Remove"><i class="fas fa-trash-alt" style="font-size:11px;"></i></button>' +
+    container.innerHTML = cart.map((item, idx) => {
+        var subtotal = Math.round(item.unit_price * item.qty);
+        if (item.is_weighted) {
+            // Weight display — no +/- buttons, show weight × price/kg
+            var weightDisplay = item.qty >= 1
+                ? item.qty.toFixed(3) + ' ' + item.unit
+                : (item.qty * 1000).toFixed(0) + 'g';
+            return '<div class="cart-item" style="border-left:3px solid #7c3aed;">' +
+                '<div class="cart-item-top">' +
+                    '<div class="item-name">' + escHtml(item.product_name) +
+                        '<span style="font-size:10px;background:#ede9fe;color:#7c3aed;padding:1px 6px;border-radius:8px;margin-left:6px;font-weight:700;">⚖ ' + weightDisplay + '</span>' +
+                    '</div>' +
+                    '<div class="item-unit-price">LL ' + Math.round(item.unit_price).toLocaleString() + ' / ' + item.unit + '</div>' +
                 '</div>' +
-                '<div class="item-subtotal">LL ' + Math.round(item.unit_price * item.qty).toLocaleString() + '</div>' +
-            '</div>' +
-        '</div>'
-    ).join('');
+                '<div class="cart-item-bottom">' +
+                    '<div class="qty-control">' +
+                        '<button class="qty-btn" style="background:#ede9fe;color:#7c3aed;" onclick="reweighItem(' + idx + ')" title="Change weight"><i class="fas fa-balance-scale" style="font-size:11px;"></i></button>' +
+                        '<span style="padding:0 8px;font-size:12px;font-weight:700;color:#7c3aed;">' + weightDisplay + '</span>' +
+                        '<button class="qty-btn remove" onclick="removeItem(' + idx + ')" title="Remove"><i class="fas fa-trash-alt" style="font-size:11px;"></i></button>' +
+                    '</div>' +
+                    '<div class="item-subtotal">LL ' + subtotal.toLocaleString() + '</div>' +
+                '</div>' +
+            '</div>';
+        } else {
+            return '<div class="cart-item">' +
+                '<div class="cart-item-top">' +
+                    '<div class="item-name">' + escHtml(item.product_name) + '</div>' +
+                    '<div class="item-unit-price">LL ' + Math.round(item.unit_price).toLocaleString() + ' / ' + (item.unit || 'pc') + '</div>' +
+                '</div>' +
+                '<div class="cart-item-bottom">' +
+                    '<div class="qty-control">' +
+                        '<button class="qty-btn" onclick="changeQty(' + idx + ',-1)">−</button>' +
+                        '<input class="qty-input" type="number" value="' + item.qty + '" min="1" onchange="setQty(' + idx + ',this.value)">' +
+                        '<button class="qty-btn" onclick="changeQty(' + idx + ',1)">+</button>' +
+                        '<button class="qty-btn remove" onclick="removeItem(' + idx + ')" title="Remove"><i class="fas fa-trash-alt" style="font-size:11px;"></i></button>' +
+                    '</div>' +
+                    '<div class="item-subtotal">LL ' + subtotal.toLocaleString() + '</div>' +
+                '</div>' +
+            '</div>';
+        }
+    }).join('');
     updateTotals();
 }
 
-function changeQty(idx, delta) { cart[idx].qty = Math.max(1, cart[idx].qty + delta); renderCart(); }
-function setQty(idx, val) { cart[idx].qty = Math.max(1, parseInt(val) || 1); renderCart(); }
+function changeQty(idx, delta) { if(!cart[idx].is_weighted) { cart[idx].qty = Math.max(1, cart[idx].qty + delta); renderCart(); } }
+function setQty(idx, val) { if(!cart[idx].is_weighted) { cart[idx].qty = Math.max(1, parseInt(val) || 1); renderCart(); } }
 function removeItem(idx) { cart.splice(idx, 1); renderCart(); }
+function reweighItem(idx) {
+    var item = cart[idx];
+    // Remove this weighted line then re-open modal
+    cart.splice(idx, 1);
+    renderCart();
+    openWeightModal(item.product_id, item.product_name, item.unit_price, item.unit);
+}
 function clearCart() { if (cart.length === 0) return; if (!confirm('Clear the cart?')) return; cart = []; renderCart(); }
 
 function updateTotals() {
@@ -1242,5 +1303,183 @@ window.addEventListener('load', function() {
     searchInput.focus();
 });
 </script>
+
+<!-- ═══════════════════════════════════════════════════
+     WEIGHT MODAL
+═══════════════════════════════════════════════════ -->
+<div id="weightModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:3000;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:16px;width:340px;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden;">
+
+    <!-- Header -->
+    <div style="background:#7c3aed;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-weight:800;font-size:1rem;" id="wModalName">Product</div>
+        <div style="font-size:.78rem;opacity:.8;" id="wModalPrice">LL 0 / kg</div>
+      </div>
+      <button onclick="closeWeightModal()" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:50%;width:30px;height:30px;cursor:pointer;font-size:1rem;">✕</button>
+    </div>
+
+    <!-- Weight display -->
+    <div style="padding:16px 18px 8px;text-align:center;">
+      <div style="font-size:.72rem;color:#9ca3af;text-transform:uppercase;font-weight:700;margin-bottom:4px;">Enter Weight</div>
+
+      <!-- Scale hint -->
+      <div style="font-size:.72rem;color:#7c3aed;margin-bottom:8px;">
+        <i class="fas fa-scale-balanced"></i>
+        USB scale: place item on scale — weight appears automatically
+      </div>
+
+      <!-- Weight input (auto-focused, scale types here) -->
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input id="wInput" type="number" min="0" step="0.001"
+               style="flex:1;font-size:1.8rem;font-weight:800;text-align:center;border:2px solid #7c3aed;border-radius:10px;padding:8px;color:#4c1d95;"
+               placeholder="0.000"
+               oninput="updateWeightCalc()"
+               onkeydown="if(event.key==='Enter') confirmWeight()">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <button id="wUnitKg" onclick="setWeightUnit('kg')"
+                  style="padding:6px 10px;border-radius:6px;border:none;cursor:pointer;font-weight:700;font-size:.78rem;background:#7c3aed;color:#fff;">kg</button>
+          <button id="wUnitG"  onclick="setWeightUnit('g')"
+                  style="padding:6px 10px;border-radius:6px;border:none;cursor:pointer;font-weight:700;font-size:.78rem;background:#e2e8f0;color:#475569;">g</button>
+        </div>
+      </div>
+
+      <!-- Live price calculation -->
+      <div id="wCalc" style="background:#f5f3ff;border-radius:10px;padding:10px;margin-bottom:12px;font-size:.85rem;color:#4c1d95;min-height:40px;display:flex;align-items:center;justify-content:center;">
+        Enter weight to see price
+      </div>
+
+      <!-- Numpad -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;">
+        <button class="wKey" onclick="numKey('1')">1</button>
+        <button class="wKey" onclick="numKey('2')">2</button>
+        <button class="wKey" onclick="numKey('3')">3</button>
+        <button class="wKey" onclick="numKey('4')">4</button>
+        <button class="wKey" onclick="numKey('5')">5</button>
+        <button class="wKey" onclick="numKey('6')">6</button>
+        <button class="wKey" onclick="numKey('7')">7</button>
+        <button class="wKey" onclick="numKey('8')">8</button>
+        <button class="wKey" onclick="numKey('9')">9</button>
+        <button class="wKey wKey-del" onclick="numKey('del')">⌫</button>
+        <button class="wKey" onclick="numKey('0')">0</button>
+        <button class="wKey wKey-dot" onclick="numKey('.')">.</button>
+      </div>
+
+      <!-- Confirm button -->
+      <button id="wConfirmBtn" onclick="confirmWeight()"
+              style="width:100%;padding:12px;background:#7c3aed;color:#fff;border:none;border-radius:10px;font-size:1rem;font-weight:800;cursor:pointer;opacity:.4;" disabled>
+        <i class="fas fa-check"></i> Add to Cart
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<style>
+.wKey { padding:12px;border:none;border-radius:8px;background:#f1f5f9;
+        font-size:1.1rem;font-weight:700;cursor:pointer;color:#1e293b;transition:background .1s; }
+.wKey:hover     { background:#e2e8f0; }
+.wKey:active    { background:#cbd5e1; }
+.wKey-del       { background:#fee2e2;color:#dc2626; }
+.wKey-del:hover { background:#fecaca; }
+.wKey-dot       { background:#ede9fe;color:#7c3aed; }
+</style>
+
+<script>
+// ── Weight Modal State ────────────────────────────────────
+var wProductId   = null;
+var wProductName = '';
+var wPricePerKg  = 0;
+var wUnit        = 'kg';     // product's defined unit (kg, g, lb)
+var wInputUnit   = 'kg';     // what the cashier is entering in (kg or g)
+
+function openWeightModal(productId, productName, pricePerKg, unit) {
+    wProductId   = productId;
+    wProductName = productName;
+    wPricePerKg  = parseFloat(pricePerKg);
+    wUnit        = unit || 'kg';
+    wInputUnit   = 'kg';
+
+    document.getElementById('wModalName').textContent  = productName;
+    document.getElementById('wModalPrice').textContent = 'LL ' + Math.round(pricePerKg).toLocaleString() + ' / ' + wUnit;
+    document.getElementById('wInput').value = '';
+    document.getElementById('wCalc').textContent = 'Enter weight to see price';
+    document.getElementById('wConfirmBtn').disabled = true;
+    document.getElementById('wConfirmBtn').style.opacity = '.4';
+    setWeightUnit('kg');
+
+    var overlay = document.getElementById('weightModalOverlay');
+    overlay.style.display = 'flex';
+    setTimeout(() => document.getElementById('wInput').focus(), 100);
+}
+
+function closeWeightModal() {
+    document.getElementById('weightModalOverlay').style.display = 'none';
+    wProductId = null;
+    if (typeof searchInput !== 'undefined') searchInput.focus();
+}
+
+function setWeightUnit(unit) {
+    wInputUnit = unit;
+    document.getElementById('wUnitKg').style.background = unit === 'kg' ? '#7c3aed' : '#e2e8f0';
+    document.getElementById('wUnitKg').style.color      = unit === 'kg' ? '#fff' : '#475569';
+    document.getElementById('wUnitG').style.background  = unit === 'g'  ? '#7c3aed' : '#e2e8f0';
+    document.getElementById('wUnitG').style.color       = unit === 'g'  ? '#fff' : '#475569';
+    updateWeightCalc();
+}
+
+function updateWeightCalc() {
+    var raw = parseFloat(document.getElementById('wInput').value);
+    if (!raw || raw <= 0) {
+        document.getElementById('wCalc').textContent = 'Enter weight to see price';
+        document.getElementById('wConfirmBtn').disabled = true;
+        document.getElementById('wConfirmBtn').style.opacity = '.4';
+        return;
+    }
+
+    // Convert to kg for calculation
+    var weightKg = wInputUnit === 'g' ? raw / 1000 : raw;
+    var total    = Math.round(wPricePerKg * weightKg);
+
+    var displayWeight = wInputUnit === 'g'
+        ? raw.toFixed(0) + 'g'
+        : (weightKg >= 1 ? weightKg.toFixed(3) + ' kg' : (weightKg * 1000).toFixed(0) + 'g');
+
+    document.getElementById('wCalc').innerHTML =
+        '<strong>' + displayWeight + '</strong>' +
+        ' &times; LL ' + Math.round(wPricePerKg).toLocaleString() + ' / kg' +
+        ' = <strong style="font-size:1rem;">LL ' + total.toLocaleString() + '</strong>';
+
+    document.getElementById('wConfirmBtn').disabled = false;
+    document.getElementById('wConfirmBtn').style.opacity = '1';
+}
+
+function confirmWeight() {
+    var raw = parseFloat(document.getElementById('wInput').value);
+    if (!raw || raw <= 0 || !wProductId) return;
+    var weightKg = wInputUnit === 'g' ? raw / 1000 : raw;
+    closeWeightModal();
+    addWeightedToCart(wProductId, wProductName, wPricePerKg, parseFloat(weightKg.toFixed(3)), wUnit);
+}
+
+// ── Numpad ────────────────────────────────────────────────
+function numKey(k) {
+    var inp = document.getElementById('wInput');
+    if (k === 'del') {
+        inp.value = inp.value.slice(0, -1);
+    } else if (k === '.') {
+        if (!inp.value.includes('.')) inp.value += '.';
+    } else {
+        inp.value += k;
+    }
+    updateWeightCalc();
+}
+
+// Close on overlay click
+document.getElementById('weightModalOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closeWeightModal();
+});
+</script>
+
 </body>
 </html>

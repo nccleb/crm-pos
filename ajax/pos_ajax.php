@@ -55,14 +55,14 @@ switch ($action) {
 
         if ($raw === '') {
             $res = mysqli_query($conn,
-                "SELECT codep, nomp, price, onhand, unit, category, image, barcode
+                "SELECT codep, nomp, price, onhand, unit, category, image, barcode, is_weighted
                  FROM produit WHERE active = 1 $cat_sql
                  ORDER BY nomp LIMIT 500"
             );
         } else {
             $q = '%' . mysqli_real_escape_string($conn, $raw) . '%';
             $res = mysqli_query($conn,
-                "SELECT codep, nomp, price, onhand, unit, category, image, barcode
+                "SELECT codep, nomp, price, onhand, unit, category, image, barcode, is_weighted
                  FROM produit
                  WHERE active = 1 $cat_sql
                  AND (nomp LIKE '$q' OR barcode LIKE '$q')
@@ -114,7 +114,7 @@ switch ($action) {
         foreach ($items as $item) {
             $lbp_price = (float)$item['unit_price'];
             $usd_price = $lbp_price / $usd_to_lbp;
-            $total += $usd_price * (int)$item['qty'];
+            $total += $usd_price * (float)$item['qty'];   // float for weighted items
         }
         $discount_usd = $discount / $usd_to_lbp;  // discount arrives in LBP — convert to USD
         $final_total  = max(0, $total - $discount_usd); // pre-VAT, stored in USD
@@ -141,28 +141,27 @@ switch ($action) {
 
         // Insert sale items, update stock and log movements
         foreach ($items as $item) {
-            $product_id   = (int)$item['product_id'];
-            $product_name = mysqli_real_escape_string($conn, $item['product_name']);
-            $qty          = (int)$item['qty'];
+            $product_id     = (int)$item['product_id'];
+            $product_name   = mysqli_real_escape_string($conn, $item['product_name']);
+            $qty            = (float)$item['qty'];          // float — supports 0.750 kg
+            $is_weighted    = !empty($item['is_weighted']) ? 1 : 0;
             $unit_price_lbp = (float)$item['unit_price'];
-            $unit_price   = $unit_price_lbp / $usd_to_lbp; // convert to USD for DB
-            $subtotal     = $qty * $unit_price;
+            $unit_price     = $unit_price_lbp / $usd_to_lbp;
+            $subtotal       = $qty * $unit_price;
 
             mysqli_query($conn,
                 "INSERT INTO pos_sale_items (sale_id, product_id, product_name, qty, unit_price, subtotal)
                  VALUES ($sale_id, $product_id, '$product_name', $qty, $unit_price, $subtotal)"
             );
 
-            // Get stock before update
+            // Stock deduction — works for both pieces and kg
             $stock_row  = mysqli_fetch_assoc(mysqli_query($conn, "SELECT onhand FROM produit WHERE codep = $product_id LIMIT 1"));
-            $qty_before = (int)($stock_row['onhand'] ?? 0);
-            $qty_after  = max(0, $qty_before - $qty);
-            $qty_change = $qty_after - $qty_before;
+            $qty_before = (float)($stock_row['onhand'] ?? 0);
+            $qty_after  = max(0, round($qty_before - $qty, 3));
+            $qty_change = round($qty_after - $qty_before, 3);
 
-            // Update stock
             mysqli_query($conn, "UPDATE produit SET onhand = $qty_after WHERE codep = $product_id");
 
-            // Log movement
             mysqli_query($conn,
                 "INSERT INTO stock_movements (product_id, product_name, type, qty_change, qty_before, qty_after, reference_id, note, agent_id, agent_name)
                  VALUES ($product_id, '$product_name', 'sale', $qty_change, $qty_before, $qty_after, $sale_id, 'Sale #$sale_id', $agent_id, '$agent_name')"

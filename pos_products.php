@@ -9,7 +9,12 @@ $co_rate = mysqli_fetch_assoc(mysqli_query($conn, "SELECT usd_to_lbp FROM compan
 $usd_to_lbp = (float)($co_rate['usd_to_lbp'] ?? 89500);
 mysqli_set_charset($conn,'utf8mb4');
 
+// Check if is_weighted column exists (requires pos_weight.sql to have been run)
+$col_check   = mysqli_query($conn, "SHOW COLUMNS FROM produit LIKE 'is_weighted'");
+$has_weighted = $col_check && mysqli_num_rows($col_check) > 0;
+
 $msg = ''; $msg_type = '';
+if (isset($_GET['msg']) && $_GET['msg'] === 'updated') { $msg = '✅ Product updated successfully.'; $msg_type = 'success'; }
 
 // ── Handle actions ─────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -17,12 +22,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['add_product'])) {
         $nomp     = mysqli_real_escape_string($conn, trim($_POST['nomp']));
         $category = mysqli_real_escape_string($conn, $_POST['category']);
-        $price    = (float)$_POST['price'] / $usd_to_lbp; // entered in LBP → save as USD
-        $cost     = (float)$_POST['cost_price'] / $usd_to_lbp;
-        $onhand   = (int)$_POST['onhand'];
+        $price    = (float)str_replace(',', '', $_POST['price'] ?? '0');  // stored directly in LBP
+        $cost     = (float)str_replace(',', '', $_POST['cost_price'] ?? '0');
+        $onhand   = (float)$_POST['onhand'];   // float for weighted products
         $unit     = mysqli_real_escape_string($conn, $_POST['unit']);
         $desc     = mysqli_real_escape_string($conn, trim($_POST['description']));
         $barcode  = mysqli_real_escape_string($conn, trim($_POST['barcode']));
+        $is_weighted = isset($_POST['is_weighted']) ? 1 : 0;
         $ond      = $unit;
 
         // Handle image upload
@@ -40,10 +46,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        $r = mysqli_query($conn,
-            "INSERT INTO produit (nomp, category, price, cost_price, onhand, unit, description, barcode, ond, active, image)
-             VALUES ('$nomp','$category',$price,$cost,$onhand,'$unit','$desc','$barcode','$ond',1,'$image')"
-        );
+        if ($has_weighted) {
+            $r = mysqli_query($conn,
+                "INSERT INTO produit (nomp, category, price, cost_price, onhand, unit, description, barcode, ond, active, image, is_weighted)
+                 VALUES ('$nomp','$category',$price,$cost,$onhand,'$unit','$desc','$barcode','$ond',1,'$image',$is_weighted)"
+            );
+        } else {
+            $r = mysqli_query($conn,
+                "INSERT INTO produit (nomp, category, price, cost_price, onhand, unit, description, barcode, ond, active, image)
+                 VALUES ('$nomp','$category',$price,$cost,$onhand,'$unit','$desc','$barcode','$ond',1,'$image')"
+            );
+        }
         $msg = $r ? '✅ Product added.' : '❌ Error: ' . mysqli_error($conn);
         $msg_type = $r ? 'success' : 'error';
     }
@@ -52,13 +65,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id       = (int)$_POST['codep'];
         $nomp     = mysqli_real_escape_string($conn, trim($_POST['nomp']));
         $category = mysqli_real_escape_string($conn, $_POST['category']);
-        $price    = (float)$_POST['price'] / $usd_to_lbp; // entered in LBP → save as USD
-        $cost     = (float)$_POST['cost_price'] / $usd_to_lbp;
-        $onhand   = (int)$_POST['onhand'];
+        $price    = (float)str_replace(',', '', $_POST['price'] ?? '0');  // stored directly in LBP
+        $cost     = (float)str_replace(',', '', $_POST['cost_price'] ?? '0');
+        $onhand   = (float)$_POST['onhand'];   // float for weighted products
         $unit     = mysqli_real_escape_string($conn, $_POST['unit']);
         $desc     = mysqli_real_escape_string($conn, trim($_POST['description']));
         $barcode  = mysqli_real_escape_string($conn, trim($_POST['barcode']));
         $active   = isset($_POST['active']) ? 1 : 0;
+        $is_weighted = isset($_POST['is_weighted']) ? 1 : 0;
 
         // Handle image upload for edit
         $image_sql = '';
@@ -87,12 +101,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $image_sql = ", image=''";
         }
 
+        $weighted_sql = $has_weighted ? ", is_weighted=$is_weighted" : '';
+
         mysqli_query($conn,
             "UPDATE produit SET nomp='$nomp', category='$category', price=$price,
              cost_price=$cost, onhand=$onhand, unit='$unit', description='$desc',
-             barcode='$barcode', active=$active $image_sql WHERE codep=$id"
+             barcode='$barcode', active=$active $weighted_sql $image_sql WHERE codep=$id"
         );
-        $msg = '✅ Product updated.'; $msg_type = 'success';
+        $err = mysqli_error($conn);
+        if ($err) {
+            $msg = '❌ DB Error: ' . $err;
+            $msg_type = 'error';
+        } else {
+            header("Location: pos_products.php?msg=updated");
+            exit();
+        }
     }
 
     if (isset($_POST['delete_product'])) {
@@ -120,8 +143,8 @@ while ($c = mysqli_fetch_assoc($cats)) $categories[] = $c;
 $stats = mysqli_fetch_assoc(mysqli_query($conn,
     "SELECT COUNT(*) as total,
      SUM(CASE WHEN active=1 THEN 1 ELSE 0 END) as active_count,
-     SUM(CASE WHEN onhand <= 0 AND active=1 THEN 1 ELSE 0 END) as out_of_stock,
-     SUM(CASE WHEN onhand > 0 AND onhand <= 5 AND active=1 THEN 1 ELSE 0 END) as low_stock,
+     SUM(CASE WHEN onhand <= 0 AND active=1 " . ($has_weighted ? "AND (is_weighted IS NULL OR is_weighted=0)" : "") . " THEN 1 ELSE 0 END) as out_of_stock,
+     SUM(CASE WHEN onhand > 0 AND onhand <= 5 AND active=1 " . ($has_weighted ? "AND (is_weighted IS NULL OR is_weighted=0)" : "") . " THEN 1 ELSE 0 END) as low_stock,
      SUM(onhand * cost_price) as stock_value
      FROM produit"
 ));
@@ -224,7 +247,7 @@ tr:hover td { background:#fafafa; }
     <div class="stat"><div class="val"><?= $stats['active_count'] ?></div><div class="lbl">Active Products</div></div>
     <div class="stat red"><div class="val"><?= $stats['out_of_stock'] ?></div><div class="lbl">Out of Stock</div></div>
     <div class="stat orange"><div class="val"><?= $stats['low_stock'] ?></div><div class="lbl">Low Stock (≤5)</div></div>
-    <div class="stat green"><div class="val">LL <?= number_format(round(($stats['stock_value'] ?? 0) * $usd_to_lbp), 0) ?></div><div class="lbl">Stock Value (Cost)</div></div>
+    <div class="stat green"><div class="val">LL <?= number_format(round($stats['stock_value'] ?? 0), 0) ?></div><div class="lbl">Stock Value (Cost)</div></div>
     <div class="stat"><div class="val"><?= $stats['total'] ?></div><div class="lbl">Total Products</div></div>
 </div>
 
@@ -248,28 +271,40 @@ tr:hover td { background:#fafafa; }
                 </div>
                 <div class="form-group">
                     <label>Unit</label>
-                    <select name="unit">
+                    <select name="unit" id="add_unit">
                         <option value="piece">Piece</option>
                         <option value="box">Box</option>
                         <option value="meter">Meter</option>
                         <option value="roll">Roll</option>
-                        <option value="kg">KG</option>
+                        <option value="kg">KG (weight)</option>
                         <option value="service">Service</option>
                     </select>
+                </div>
+                <div class="form-group">
+                    <label>Weight-Based Pricing</label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:6px;">
+                        <input type="checkbox" name="is_weighted" id="add_is_weighted" value="1"
+                               onchange="toggleWeightedAdd(this.checked)"
+                               style="width:18px;height:18px;accent-color:#7c3aed;">
+                        <span style="font-size:.85rem;color:#4c1d95;font-weight:600;">⚖ Price per kg (weight item)</span>
+                    </label>
+                    <small style="color:#9ca3af;font-size:.75rem;">Enable for labneh, olives, cheese, meat, etc.</small>
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Selling Price (LL) *</label>
-                    <input type="number" name="price" step="1000" min="0" required placeholder="e.g. 895000">
+                    <label id="add_price_label">Selling Price (LL) *</label>
+                    <input type="number" name="price" step="1" min="0" required placeholder="e.g. 895000">
+                    <small id="add_price_hint" style="color:#9ca3af;font-size:.75rem;display:none;">Price per kg — e.g. LL 45,000 / kg</small>
                 </div>
                 <div class="form-group">
                     <label>Cost Price (LL)</label>
-                    <input type="number" name="cost_price" step="1000" min="0" placeholder="e.g. 700000" value="0">
+                    <input type="number" name="cost_price" step="1" min="0" placeholder="e.g. 700000" value="0">
                 </div>
                 <div class="form-group">
-                    <label>Initial Stock (qty)</label>
-                    <input type="number" name="onhand" min="0" value="0">
+                    <label id="add_stock_label">Initial Stock (qty)</label>
+                    <input type="number" name="onhand" min="0" step="0.001" value="0">
+                    <small id="add_stock_hint" style="color:#9ca3af;font-size:.75rem;display:none;">Enter in kg — e.g. 5.500 for 5.5kg</small>
                 </div>
             </div>
             <div class="form-row">
@@ -351,10 +386,12 @@ tr:hover td { background:#fafafa; }
                     <?php if ($p['barcode']): ?><br><small style="color:#9ca3af;"><?= htmlspecialchars($p['barcode']) ?></small><?php endif; ?>
                 </td>
                 <td><?= htmlspecialchars($p['category'] ?? '—') ?></td>
-                <td><strong>LL <?= number_format(round($p['price'] * $usd_to_lbp), 0) ?></strong></td>
-                <td>LL <?= number_format(round(($p['cost_price'] ?? 0) * $usd_to_lbp), 0) ?></td>
+                <td><strong>LL <?= number_format(round($p['price']), 0) ?></strong></td>
+                <td>LL <?= number_format(round($p['cost_price'] ?? 0), 0) ?></td>
                 <td>
-                    <?php if ($p['onhand'] <= 0): ?>
+                    <?php if (!empty($p['is_weighted']) && $has_weighted): ?>
+                        <span style="color:#7c3aed;font-weight:700;">⚖ <?= $p['onhand'] ?> <?= htmlspecialchars($p['unit']) ?></span>
+                    <?php elseif ($p['onhand'] <= 0): ?>
                         <span class="badge badge-out">Out of stock</span>
                     <?php elseif ($p['onhand'] <= 5): ?>
                         <span class="badge badge-low">⚠ <?= $p['onhand'] ?></span>
@@ -419,19 +456,28 @@ tr:hover td { background:#fafafa; }
                             <option value="box">Box</option>
                             <option value="meter">Meter</option>
                             <option value="roll">Roll</option>
-                            <option value="kg">KG</option>
+                            <option value="kg">KG (weight)</option>
                             <option value="service">Service</option>
                         </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Weight-Based Pricing</label>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:6px;">
+                            <input type="checkbox" name="is_weighted" id="edit_is_weighted" value="1"
+                                   onchange="toggleWeightedEdit(this.checked)"
+                                   style="width:18px;height:18px;accent-color:#7c3aed;">
+                            <span style="font-size:.85rem;color:#4c1d95;font-weight:600;">⚖ Price per kg</span>
+                        </label>
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label>Selling Price (LL)</label>
-                        <input type="number" name="price" id="edit_price" step="1000" min="0">
+                        <input type="number" name="price" id="edit_price" step="1" min="0">
                     </div>
                     <div class="form-group">
                         <label>Cost Price (LL)</label>
-                        <input type="number" name="cost_price" id="edit_cost" step="1000" min="0">
+                        <input type="number" name="cost_price" id="edit_cost" step="1" min="0">
                     </div>
                     <div class="form-group">
                         <label>Stock (qty)</label>
@@ -486,8 +532,8 @@ var USD_TO_LBP = <?= $usd_to_lbp ?>;
 function openEdit(p) {
     document.getElementById('edit_codep').value    = p.codep;
     document.getElementById('edit_nomp').value     = p.nomp;
-    document.getElementById('edit_price').value    = Math.round(p.price * USD_TO_LBP);
-    document.getElementById('edit_cost').value     = Math.round((p.cost_price || 0) * USD_TO_LBP);
+    document.getElementById('edit_price').value    = String(Math.round(p.price));
+    document.getElementById('edit_cost').value     = String(Math.round(p.cost_price || 0));
     document.getElementById('edit_onhand').value   = p.onhand;
     document.getElementById('edit_unit').value     = p.unit || 'piece';
     document.getElementById('edit_barcode').value  = p.barcode || '';
@@ -495,6 +541,10 @@ function openEdit(p) {
     document.getElementById('edit_active').checked = p.active == 1;
     document.getElementById('edit_category').value = p.category || 'General';
     document.getElementById('edit_remove_image').value = '0';
+    // is_weighted
+    var isW = p.is_weighted == 1;
+    document.getElementById('edit_is_weighted').checked = isW;
+    toggleWeightedEdit(isW);
 
     // Handle image preview
     var preview = document.getElementById('edit_img_preview');
@@ -559,6 +609,25 @@ function removeEditImage() {
     document.getElementById('edit_img_placeholder').style.display = 'flex';
     document.getElementById('edit_remove_btn').style.display = 'none';
     document.getElementById('edit_remove_image').value = '1';
+}
+
+function toggleWeightedAdd(isW) {
+    document.getElementById('add_price_label').textContent = isW ? 'Price per kg (LL) *' : 'Selling Price (LL) *';
+    document.getElementById('add_price_hint').style.display = isW ? 'block' : 'none';
+    document.getElementById('add_stock_label').textContent = isW ? 'Initial Stock (kg)' : 'Initial Stock (qty)';
+    document.getElementById('add_stock_hint').style.display = isW ? 'block' : 'none';
+    if (isW) document.getElementById('add_unit').value = 'kg';
+}
+
+function toggleWeightedEdit(isW) {
+    var pl = document.querySelector('#editModal label[for="edit_price"], #editModal label');
+    // Find price label in edit modal
+    var priceInput = document.getElementById('edit_price');
+    if (priceInput) {
+        var lbl = priceInput.closest('.form-group')?.querySelector('label');
+        if (lbl) lbl.textContent = isW ? 'Price per kg (LL)' : 'Selling Price (LL)';
+    }
+    if (isW) document.getElementById('edit_unit').value = 'kg';
 }
 </script>
 </body>
