@@ -25,20 +25,18 @@ mysqli_close($conn);
 $vat_rate   = isset($co['vat_rate'])   && $co['vat_rate']   !== null ? (float)$co['vat_rate']   : 0;
 $usd_to_lbp = isset($co['usd_to_lbp']) && $co['usd_to_lbp'] !== null ? (float)$co['usd_to_lbp'] : 89500;
 
-$gross_usd      = (float)$sale['total'];
-$subtotal_usd   = (float)$sale['final_total'];
-$vat_amount_usd = $vat_rate > 0 ? $subtotal_usd * ($vat_rate / 100) : 0;
-$total_with_vat = $subtotal_usd + $vat_amount_usd;
-
+// All amounts stored in LBP directly
+$gross_lbp   = (float)$sale['total'];
+$sub_lbp     = (float)$sale['final_total'];
+$vat_lbp     = $vat_rate > 0 ? round($sub_lbp * ($vat_rate / 100)) : 0;
+$exact_lbp   = round($sub_lbp + $vat_lbp);
 $note        = 5000;
-$gross_lbp   = round($gross_usd      * $usd_to_lbp);
-$sub_lbp     = round($subtotal_usd   * $usd_to_lbp);
-$vat_lbp     = round($vat_amount_usd * $usd_to_lbp);
-$exact_lbp   = round($total_with_vat * $usd_to_lbp);
 $due_lbp     = round($exact_lbp / $note) * $note;
 $rounding    = $due_lbp - $exact_lbp;
-$disc_lbp    = round((float)$sale['discount'] * $usd_to_lbp);
+$disc_lbp    = (float)$sale['discount'];
 $has_discount = $sale['discount'] > 0;
+// USD equivalent for display only
+$total_with_vat = $usd_to_lbp > 0 ? $exact_lbp / $usd_to_lbp : 0;
 
 $pay_labels = [
     'cash'=>'Cash','card'=>'Card','omt'=>'OMT','whish'=>'Whish',
@@ -167,12 +165,17 @@ body {
     </thead>
     <tbody>
     <?php foreach ($items as $item):
-        $unit_lbp = round($item['unit_price'] * $usd_to_lbp);
-        $item_lbp = round($item['subtotal']   * $usd_to_lbp);
+        $unit_lbp = round((float)$item['unit_price']);
+        $item_lbp = round((float)$item['subtotal']);
+        // Show weight for weighted items
+        $qty_display = (float)$item['qty'];
+        $qty_str = ($qty_display != intval($qty_display))
+            ? number_format($qty_display, 3) . ' kg'
+            : number_format($qty_display, 0);
     ?>
     <tr>
         <td><?= htmlspecialchars($item['product_name']) ?></td>
-        <td class="c"><?= $item['qty'] ?></td>
+        <td class="c"><?= $qty_str ?></td>
         <td class="r">LL <?= number_format($unit_lbp, 0) ?></td>
         <td class="r">LL <?= number_format($item_lbp, 0) ?></td>
     </tr>

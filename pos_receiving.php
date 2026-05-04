@@ -153,18 +153,7 @@ body  { background:#f1f5f9; font-size:.9rem; }
           <input type="text" id="receivingNotes" class="form-control form-control-sm"
                  placeholder="e.g. Partial delivery, waiting for cold items...">
         </div>
-        <div class="col-md-4">
-          <label class="form-label fw-semibold">Rate Used
-            <span class="text-muted fw-normal">(1 USD =)</span>
-          </label>
-          <div class="input-group input-group-sm">
-            <span class="input-group-text">LL</span>
-            <input type="number" id="exchangeRate" class="form-control"
-                   value="<?= number_format($usd_to_lbp, 0, '.', '') ?>"
-                   onchange="recalcAll()">
-          </div>
-          <div class="cost-hint">Auto-loaded from Settings. Change if today's rate differs.</div>
-        </div>
+
       </div>
     </div>
 
@@ -196,8 +185,7 @@ body  { background:#f1f5f9; font-size:.9rem; }
             <tr>
               <th style="width:26%">Product</th>
               <th style="width:10%">Qty</th>
-              <th style="width:14%">Cost (USD $)</th>
-              <th style="width:18%">Cost (LBP LL)</th>
+              <th style="width:32%">Cost per unit (LL)</th>
               <th style="width:14%">Expiry</th>
               <th style="width:14%">Subtotal</th>
               <th style="width:4%"></th>
@@ -212,13 +200,10 @@ body  { background:#f1f5f9; font-size:.9rem; }
     <div class="card-block">
       <div class="totals-bar mb-3">
         <div>
-          <div class="lbl">TOTAL COST (USD)</div>
-          <div class="amt" id="totalUsd">$0.00</div>
+          <div class="lbl">TOTAL COST (LL)</div>
+          <div class="amt" id="totalUsd">LL 0</div>
         </div>
-        <div>
-          <div class="lbl">TOTAL COST (LBP)</div>
-          <div class="amt" id="totalLbp">LL 0</div>
-        </div>
+        <div id="totalLbp" style="display:none"></div>
         <div>
           <div class="lbl">PRODUCTS</div>
           <div class="amt" id="totalItems">0</div>
@@ -297,7 +282,7 @@ let items       = [];   // [{product_id, product_name, qty, cost_price_usd, cost
 let suppliers   = [];
 let searchTimer = null;
 const detailModal = new bootstrap.Modal(document.getElementById('detailModal'));
-const RATE = () => parseFloat(document.getElementById('exchangeRate').value) || 89700;
+const RATE = () => <?= $usd_to_lbp ?>; // rate kept for reference, not used in LBP storage
 
 // ── Init ───────────────────────────────────────────────────
 (async function init() {
@@ -401,20 +386,22 @@ async function addItem(p) {
     lastCost   = data.last_cost;
   } catch(e) {}
 
-  const cost_usd = lastCost ? parseFloat(lastCost.cost_price_usd) : parseFloat(p.cost_price || 0);
-  const cost_lbp = cost_usd * RATE();
+  // All costs in LBP now
+  const cost_lbp = lastCost
+    ? parseFloat(lastCost.cost_price_lbp || 0)
+    : parseFloat(p.cost_price || 0);
 
   items.push({
-    product_id:    p.id,
-    product_name:  p.nomp,
-    unit:          p.unit || 'pc',
-    qty:           1,
-    cost_price_usd: cost_usd,
+    product_id:     p.id,
+    product_name:   p.nomp,
+    unit:           p.unit || 'pc',
+    qty:            1,
     cost_price_lbp: Math.round(cost_lbp),
-    expiry_date:   '',
-    notes:         '',
-    last_cost:     lastCost,
-    current_cost:  parseFloat(p.cost_price || 0),
+    last_cost_lbp:  lastCost ? parseFloat(lastCost.cost_price_lbp || 0) : parseFloat(p.cost_price || 0),
+    expiry_date:    '',
+    notes:          '',
+    last_cost:      lastCost,
+    current_cost:   parseFloat(p.cost_price || 0),
   });
 
   renderItems();
@@ -437,12 +424,12 @@ function renderItems() {
   wrap.classList.remove('d-none');
 
   tbody.innerHTML = items.map((item, idx) => {
-    const sub_usd = (item.qty * item.cost_price_usd).toFixed(2);
-    const sub_lbp = Math.round(item.qty * item.cost_price_lbp).toLocaleString();
-    const costChanged = item.current_cost && Math.abs(item.cost_price_usd - item.current_cost) > 0.001;
+    const sub_lbp_total = Math.round(item.qty * item.cost_price_lbp);
+  
+    const costChanged = item.current_cost && Math.abs(item.cost_price_lbp - item.current_cost) > 100;
     const lastInfo = item.last_cost
-      ? `Last: $${parseFloat(item.last_cost.cost_price_usd).toFixed(2)} on ${item.last_cost.received_date}`
-      : `Current: $${item.current_cost.toFixed(2)}`;
+      ? `Last: LL ${Math.round(item.last_cost_lbp || 0).toLocaleString()} on ${item.last_cost ? item.last_cost.received_date : ''}`
+      : `Current: LL ${Math.round(item.current_cost).toLocaleString()}`;
 
     return `
     <tr>
@@ -458,14 +445,10 @@ function renderItems() {
       </td>
       <td>
         <input type="number" class="form-control form-control-sm ${costChanged?'border-danger':''}"
-               min="0" step="0.0001" value="${item.cost_price_usd}"
-               onchange="updateCostUsd(${idx},this.value)">
-        ${costChanged ? `<div class="cost-hint cost-changed">⚠ was $${item.current_cost.toFixed(2)}</div>` : ''}
-      </td>
-      <td>
-        <input type="number" class="form-control form-control-sm" min="0" step="1"
-               value="${Math.round(item.cost_price_usd * RATE())}"
+               min="0" step="1" onwheel="this.blur()"
+               value="${Math.round(item.cost_price_lbp)}"
                onchange="updateCostLbp(${idx},this.value)">
+        ${costChanged ? `<div class="cost-hint cost-changed">⚠ was LL ${Math.round(item.last_cost_lbp).toLocaleString()}</div>` : ''}
       </td>
       <td>
         <input type="date" class="form-control form-control-sm"
@@ -473,8 +456,7 @@ function renderItems() {
                onchange="updateField(${idx},'expiry_date',this.value)">
       </td>
       <td class="subtotal-cell">
-        <div>$${sub_usd}</div>
-        <div class="cost-hint">LL ${sub_lbp}</div>
+        <div>LL ${sub_lbp_total.toLocaleString()}</div>
       </td>
       <td class="text-center">
         <button class="remove-btn" onclick="removeItem(${idx})"><i class="bi bi-x-circle"></i></button>
@@ -490,18 +472,8 @@ function updateField(idx, field, val) {
   recalcAll();
 }
 
-function updateCostUsd(idx, val) {
-  const usd = parseFloat(val) || 0;
-  items[idx].cost_price_usd = usd;
-  items[idx].cost_price_lbp = Math.round(usd * RATE());
-  renderItems();
-  recalcAll();
-}
-
 function updateCostLbp(idx, val) {
-  const lbp = parseFloat(val) || 0;
-  items[idx].cost_price_lbp = lbp;
-  items[idx].cost_price_usd = lbp / RATE();
+  items[idx].cost_price_lbp = parseFloat(val) || 0;
   renderItems();
   recalcAll();
 }
@@ -515,12 +487,11 @@ function removeItem(idx) {
 function recalcAll() {
   let totalUsd = 0, totalLbp = 0, totalUnits = 0;
   items.forEach(i => {
-    totalUsd   += i.qty * i.cost_price_usd;
     totalLbp   += i.qty * i.cost_price_lbp;
     totalUnits += i.qty;
   });
-  document.getElementById('totalUsd').textContent   = '$' + totalUsd.toFixed(2);
-  document.getElementById('totalLbp').textContent   = 'LL ' + Math.round(totalLbp).toLocaleString();
+  document.getElementById('totalUsd').textContent   = 'LL ' + Math.round(totalLbp).toLocaleString();
+  document.getElementById('totalLbp').textContent   = '';
   document.getElementById('totalItems').textContent = items.length;
   document.getElementById('totalUnits').textContent = parseFloat(totalUnits.toFixed(3));
 }
@@ -539,15 +510,15 @@ async function saveReceiving() {
     invoice_number: document.getElementById('invoiceNo').value.trim(),
     received_date:  document.getElementById('receivedDate').value,
     notes:          document.getElementById('receivingNotes').value.trim(),
-    exchange_rate:  RATE(),
+    exchange_rate:  <?= $usd_to_lbp ?>,
     items: items.map(i => ({
-      product_id:    i.product_id,
-      product_name:  i.product_name,
-      qty:           i.qty,
-      cost_price_usd: i.cost_price_usd,
+      product_id:     i.product_id,
+      product_name:   i.product_name,
+      qty:            i.qty,
       cost_price_lbp: i.cost_price_lbp,
-      expiry_date:   i.expiry_date || '',
-      notes:         i.notes || '',
+      cost_price_usd: 0,  // no longer used
+      expiry_date:    i.expiry_date || '',
+      notes:          i.notes || '',
     }))
   };
 
@@ -632,8 +603,7 @@ async function loadHistory() {
           ${r.notes ? `<div class="meta text-muted">${esc(r.notes)}</div>` : ''}
         </div>
         <div class="text-end">
-          <div class="amt">$${parseFloat(r.total_cost_usd).toFixed(2)}</div>
-          <div class="meta">LL ${Math.round(r.total_cost_lbp).toLocaleString()}</div>
+          <div class="amt">LL ${Math.round(r.total_cost_lbp).toLocaleString()}</div>
         </div>
       </div>
     </div>
@@ -660,7 +630,6 @@ async function showDetail(id) {
     <tr>
       <td>${esc(i.product_name)}</td>
       <td class="text-end">${parseFloat(i.qty_received)}</td>
-      <td class="text-end">$${parseFloat(i.cost_price_usd).toFixed(4)}</td>
       <td class="text-end">LL ${Math.round(i.cost_price_lbp).toLocaleString()}</td>
       <td class="text-end">$${parseFloat(i.subtotal_usd).toFixed(2)}</td>
       <td class="text-center">${i.expiry_date || '—'}</td>
@@ -682,7 +651,7 @@ async function showDetail(id) {
         <thead style="background:#1a2b4a;color:#fff">
           <tr>
             <th>Product</th><th class="text-end">Qty</th>
-            <th class="text-end">Cost USD</th><th class="text-end">Cost LBP</th>
+            <th class="text-end">Cost (LL)</th>
             <th class="text-end">Subtotal</th><th class="text-center">Expiry</th>
             <th>Notes</th>
           </tr>
@@ -691,8 +660,7 @@ async function showDetail(id) {
         <tfoot style="background:#f8fafc;font-weight:700">
           <tr>
             <td colspan="4">TOTAL</td>
-            <td class="text-end">$${parseFloat(r.total_cost_usd).toFixed(2)}</td>
-            <td colspan="2" class="text-end">LL ${Math.round(r.total_cost_lbp).toLocaleString()}</td>
+            <td colspan="3" class="text-end">LL ${Math.round(r.total_cost_lbp).toLocaleString()}</td>
           </tr>
         </tfoot>
       </table>

@@ -151,13 +151,10 @@ function printEscPos($sale_id, $conn) {
     ];
 
     // ── Financial calculations (all in USD first, then → LBP) ─────────────
-    $subtotal_usd    = (float)$sale['final_total'];                           // pre-VAT, pre-discount, USD
-    $vat_amount_usd  = $vat_rate > 0 ? $subtotal_usd * ($vat_rate / 100) : 0;
-    $total_vat_usd   = $subtotal_usd + $vat_amount_usd;                      // incl. VAT, USD
-
-    $lbp_subtotal    = round($subtotal_usd  * $usd_to_lbp);
-    $lbp_vat         = round($vat_amount_usd * $usd_to_lbp);
-    $lbp_exact       = round($total_vat_usd  * $usd_to_lbp);                 // exact LBP before rounding
+    // All amounts stored in LBP directly
+    $lbp_subtotal    = (float)$sale['final_total'];
+    $lbp_vat         = $vat_rate > 0 ? round($lbp_subtotal * ($vat_rate / 100)) : 0;
+    $lbp_exact       = round($lbp_subtotal + $lbp_vat);
     $lbp_due         = round($lbp_exact / 5000) * 5000;                      // nearest LL 5,000
     $lbp_rounding    = $lbp_due - $lbp_exact;                                // negative = store absorbs
 
@@ -216,15 +213,17 @@ function printEscPos($sale_id, $conn) {
     $d .= BOLD_ON . $hdr_name . $hdr_qty . $hdr_unit . $hdr_sub . LF . BOLD_OFF;
     $d .= str_repeat('-', $W) . LF;
 
-    // Item rows — FIX: unit_price stored in USD → convert to LBP
+    // Item rows — unit_price stored in LBP directly
     foreach ($items as $item) {
-        $unit_lbp = round((float)$item['unit_price'] * $usd_to_lbp);
-        $sub_lbp  = round($unit_lbp * (int)$item['qty']);
+        $unit_lbp = round((float)$item['unit_price']);
+        $qty_val  = (float)$item['qty'];
+        $sub_lbp  = round($unit_lbp * $qty_val);
+        $qty_disp = ($qty_val != intval($qty_val)) ? number_format($qty_val,3).'kg' : (string)(int)$qty_val;
 
         $name_cell = mb_substr($item['product_name'], 0, $col_name);
         $name_cell = str_pad($name_cell, $col_name); // pad to column width
 
-        $qty_cell  = str_pad((string)(int)$item['qty'],                $col_qty,  ' ', STR_PAD_LEFT);
+        $qty_cell  = str_pad($qty_disp,                                $col_qty,  ' ', STR_PAD_LEFT);
         $unit_cell = str_pad(number_format($unit_lbp, 0),             $col_unit, ' ', STR_PAD_LEFT);
         $sub_cell  = str_pad(number_format($sub_lbp,  0),             $col_sub,  ' ', STR_PAD_LEFT);
 
@@ -256,12 +255,12 @@ function printEscPos($sale_id, $conn) {
 
     // ── Discount line (shown under totals if applicable) ───────────────────
     if ((float)($sale['discount'] ?? 0) > 0) {
-        $disc_lbp = round((float)$sale['discount'] * $usd_to_lbp);
+        $disc_lbp = round((float)$sale['discount']);
         $d .= twoCol('Discount applied', '-LL ' . number_format($disc_lbp, 0), $W) . LF;
     }
 
     // ── USD equivalent box ─────────────────────────────────────────────────
-    if ($usd_to_lbp > 0) {
+    if ($usd_to_lbp > 0) { // compute USD equivalent from LBP total
         $d .= str_repeat('-', $W) . LF;
         $d .= ALIGN_CENTER;
         $d .= '$ ' . number_format($total_vat_usd, 2) . LF;

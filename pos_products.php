@@ -14,7 +14,6 @@ $col_check   = mysqli_query($conn, "SHOW COLUMNS FROM produit LIKE 'is_weighted'
 $has_weighted = $col_check && mysqli_num_rows($col_check) > 0;
 
 $msg = ''; $msg_type = '';
-if (isset($_GET['msg']) && $_GET['msg'] === 'updated') { $msg = '✅ Product updated successfully.'; $msg_type = 'success'; }
 
 // ── Handle actions ─────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -22,8 +21,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['add_product'])) {
         $nomp     = mysqli_real_escape_string($conn, trim($_POST['nomp']));
         $category = mysqli_real_escape_string($conn, $_POST['category']);
-        $price    = (float)str_replace(',', '', $_POST['price'] ?? '0');  // stored directly in LBP
-        $cost     = (float)str_replace(',', '', $_POST['cost_price'] ?? '0');
+        $price    = (float)$_POST['price'] / $usd_to_lbp; // entered in LBP → save as USD
+        $cost     = (float)$_POST['cost_price'] / $usd_to_lbp;
         $onhand   = (float)$_POST['onhand'];   // float for weighted products
         $unit     = mysqli_real_escape_string($conn, $_POST['unit']);
         $desc     = mysqli_real_escape_string($conn, trim($_POST['description']));
@@ -65,8 +64,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id       = (int)$_POST['codep'];
         $nomp     = mysqli_real_escape_string($conn, trim($_POST['nomp']));
         $category = mysqli_real_escape_string($conn, $_POST['category']);
-        $price    = (float)str_replace(',', '', $_POST['price'] ?? '0');  // stored directly in LBP
-        $cost     = (float)str_replace(',', '', $_POST['cost_price'] ?? '0');
+        $price    = (float)$_POST['price'] / $usd_to_lbp; // entered in LBP → save as USD
+        $cost     = (float)$_POST['cost_price'] / $usd_to_lbp;
         $onhand   = (float)$_POST['onhand'];   // float for weighted products
         $unit     = mysqli_real_escape_string($conn, $_POST['unit']);
         $desc     = mysqli_real_escape_string($conn, trim($_POST['description']));
@@ -108,20 +107,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
              cost_price=$cost, onhand=$onhand, unit='$unit', description='$desc',
              barcode='$barcode', active=$active $weighted_sql $image_sql WHERE codep=$id"
         );
-        $err = mysqli_error($conn);
-        if ($err) {
-            $msg = '❌ DB Error: ' . $err;
-            $msg_type = 'error';
-        } else {
-            header("Location: pos_products.php?msg=updated");
-            exit();
-        }
+        $msg = mysqli_error($conn) ? '❌ Error: ' . mysqli_error($conn) : '✅ Product updated.';
+        $msg_type = mysqli_error($conn) ? 'error' : 'success';
     }
 
     if (isset($_POST['delete_product'])) {
         $id = (int)$_POST['codep'];
         mysqli_query($conn, "UPDATE produit SET active=0 WHERE codep=$id");
         $msg = '✅ Product deactivated.'; $msg_type = 'success';
+    }
+
+    if (isset($_POST['stock_count'])) {
+        $id           = (int)$_POST['codep'];
+        $actual       = (float)str_replace(',', '', $_POST['actual_stock'] ?? '0');
+        $product_row  = mysqli_fetch_assoc(mysqli_query($conn,
+            "SELECT nomp, onhand, unit FROM produit WHERE codep=$id LIMIT 1"));
+        if ($product_row) {
+            $system_qty = (float)$product_row['onhand'];
+            $difference = round($actual - $system_qty, 3);
+            $product_name = mysqli_real_escape_string($conn, $product_row['nomp']);
+            $unit = $product_row['unit'] ?? 'pc';
+
+            mysqli_query($conn,
+                "UPDATE produit SET onhand=$actual WHERE codep=$id");
+
+            // Log the adjustment
+            $qty_after = $actual;
+            mysqli_query($conn,
+                "INSERT INTO stock_movements
+                 (product_id, product_name, type, qty_change, qty_before, qty_after, note, agent_id, agent_name)
+                 VALUES ($id, '$product_name', 'adjustment', $difference, $system_qty, $qty_after,
+                 'Weekly stock count — actual: $actual $unit (system was: $system_qty $unit)', $agent_id, '$agent_name')"
+            );
+
+            $diff_text = $difference > 0
+                ? '+' . abs($difference) . ' ' . $unit . ' surplus'
+                : abs($difference) . ' ' . $unit . ' shrinkage';
+            $msg = "✅ Stock count saved for {$product_row['nomp']}. Adjusted by $diff_text.";
+            $msg_type = 'success';
+            header("Location: pos_products.php?msg=" . urlencode($msg));
+            exit();
+        }
     }
 }
 
@@ -386,8 +412,8 @@ tr:hover td { background:#fafafa; }
                     <?php if ($p['barcode']): ?><br><small style="color:#9ca3af;"><?= htmlspecialchars($p['barcode']) ?></small><?php endif; ?>
                 </td>
                 <td><?= htmlspecialchars($p['category'] ?? '—') ?></td>
-                <td><strong>LL <?= number_format(round($p['price']), 0) ?></strong></td>
-                <td>LL <?= number_format(round($p['cost_price'] ?? 0), 0) ?></td>
+                <td><strong>LL <?= number_format(round($p['price'] * $usd_to_lbp), 0) ?></strong></td>
+                <td>LL <?= number_format(round(($p['cost_price'] ?? 0) * $usd_to_lbp), 0) ?></td>
                 <td>
                     <?php if (!empty($p['is_weighted']) && $has_weighted): ?>
                         <span style="color:#7c3aed;font-weight:700;">⚖ <?= $p['onhand'] ?> <?= htmlspecialchars($p['unit']) ?></span>
@@ -403,13 +429,19 @@ tr:hover td { background:#fafafa; }
                 <td><span class="badge badge-<?= $p['active'] ? 'active' : 'inactive' ?>"><?= $p['active'] ? 'Active' : 'Inactive' ?></span></td>
                 <td>
                     <div class="action-btns">
-                        <button class="btn btn-blue btn-sm" onclick="openEdit(<?= htmlspecialchars(json_encode($p)) ?>)">
+                        <button class="btn btn-blue btn-sm" onclick="openEdit(<?= htmlspecialchars(json_encode($p)) ?>)"
+                                title="Edit product">
                             <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-sm" style="background:#7c3aed;color:#fff;"
+                                onclick="openStockCount(<?= $p['codep'] ?>, <?= htmlspecialchars(json_encode($p['nomp'])) ?>, <?= (float)$p['onhand'] ?>, <?= htmlspecialchars(json_encode($p['unit'] ?? 'pc')) ?>)"
+                                title="Stock count">
+                            <i class="fas fa-balance-scale"></i>
                         </button>
                         <?php if ($p['active']): ?>
                         <form method="POST" style="display:inline;" onsubmit="return confirm('Deactivate this product?')">
                             <input type="hidden" name="codep" value="<?= $p['codep'] ?>">
-                            <button type="submit" name="delete_product" class="btn btn-red btn-sm">
+                            <button type="submit" name="delete_product" class="btn btn-red btn-sm" title="Deactivate">
                                 <i class="fas fa-ban"></i>
                             </button>
                         </form>
@@ -532,8 +564,8 @@ var USD_TO_LBP = <?= $usd_to_lbp ?>;
 function openEdit(p) {
     document.getElementById('edit_codep').value    = p.codep;
     document.getElementById('edit_nomp').value     = p.nomp;
-    document.getElementById('edit_price').value    = String(Math.round(p.price));
-    document.getElementById('edit_cost').value     = String(Math.round(p.cost_price || 0));
+    document.getElementById('edit_price').value    = Math.round(p.price * USD_TO_LBP);
+    document.getElementById('edit_cost').value     = Math.round((p.cost_price || 0) * USD_TO_LBP);
     document.getElementById('edit_onhand').value   = p.onhand;
     document.getElementById('edit_unit').value     = p.unit || 'piece';
     document.getElementById('edit_barcode').value  = p.barcode || '';
@@ -630,5 +662,164 @@ function toggleWeightedEdit(isW) {
     if (isW) document.getElementById('edit_unit').value = 'kg';
 }
 </script>
+
+<!-- ═══════════════════════════════════════════════════
+     STOCK COUNT MODAL
+═══════════════════════════════════════════════════ -->
+<div id="stockCountOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);
+     z-index:3000;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:16px;width:400px;max-width:95vw;
+              box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden;">
+
+    <!-- Header -->
+    <div style="background:#7c3aed;color:#fff;padding:14px 20px;
+                display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-weight:800;font-size:1rem;">⚖ Stock Count</div>
+        <div style="font-size:.8rem;opacity:.85;" id="scProductName">Product</div>
+      </div>
+      <button onclick="closeStockCount()"
+              style="background:rgba(255,255,255,.2);border:none;color:#fff;
+                     border-radius:50%;width:30px;height:30px;cursor:pointer;font-size:1rem;">✕</button>
+    </div>
+
+    <!-- Body -->
+    <div style="padding:20px;">
+
+      <!-- System vs Actual -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+        <div style="background:#f1f5f9;border-radius:10px;padding:14px;text-align:center;">
+          <div style="font-size:.72rem;color:#64748b;font-weight:700;text-transform:uppercase;">
+            System Says
+          </div>
+          <div style="font-size:1.6rem;font-weight:800;color:#1e293b;margin-top:4px;" id="scSystemQty">—</div>
+          <div style="font-size:.75rem;color:#94a3b8;" id="scSystemUnit">kg</div>
+        </div>
+        <div style="background:#f0fdf4;border-radius:10px;padding:14px;text-align:center;
+                    border:2px solid #7c3aed;">
+          <div style="font-size:.72rem;color:#7c3aed;font-weight:700;text-transform:uppercase;">
+            You Counted
+          </div>
+          <div style="font-size:1.6rem;font-weight:800;color:#7c3aed;margin-top:4px;" id="scActualDisplay">—</div>
+          <div style="font-size:.75rem;color:#94a3b8;" id="scActualUnit">kg</div>
+        </div>
+      </div>
+
+      <!-- Difference indicator -->
+      <div id="scDiff" style="text-align:center;font-size:.9rem;font-weight:700;
+                               margin-bottom:14px;min-height:24px;"></div>
+
+      <!-- Actual qty input -->
+      <div style="margin-bottom:12px;">
+        <label style="font-size:.8rem;font-weight:700;color:#374151;
+                      text-transform:uppercase;display:block;margin-bottom:6px;">
+          Actual quantity on shelf
+        </label>
+        <input type="number" id="scActualInput" min="0" step="0.001"
+               onwheel="this.blur()" oninput="updateScDiff()"
+               style="width:100%;font-size:1.4rem;font-weight:700;text-align:center;
+                      border:2px solid #7c3aed;border-radius:10px;padding:10px;color:#4c1d95;"
+               placeholder="Enter exact quantity">
+      </div>
+
+      <!-- Note -->
+      <div style="margin-bottom:16px;">
+        <label style="font-size:.8rem;font-weight:700;color:#374151;
+                      text-transform:uppercase;display:block;margin-bottom:6px;">
+          Note (optional)
+        </label>
+        <input type="text" id="scNote"
+               style="width:100%;border:1.5px solid #e2e8f0;border-radius:8px;
+                      padding:8px 12px;font-size:.88rem;"
+               placeholder="e.g. Weekly count, spillage, supplier short-delivery">
+      </div>
+
+      <!-- Hidden form -->
+      <form method="POST" id="scForm">
+        <input type="hidden" name="codep" id="scCodep">
+        <input type="hidden" name="actual_stock" id="scActualHidden">
+        <input type="hidden" name="count_note" id="scNoteHidden">
+        <button type="submit" name="stock_count" id="scSaveBtn"
+                style="width:100%;padding:12px;background:#7c3aed;color:#fff;border:none;
+                       border-radius:10px;font-size:1rem;font-weight:800;cursor:pointer;">
+          <i class="fas fa-check"></i> Save Stock Count
+        </button>
+      </form>
+
+    </div>
+  </div>
+</div>
+
+<script>
+var scSystemQty = 0;
+var scUnit = 'pc';
+var scProductId = null;
+
+function openStockCount(productId, productName, systemQty, unit) {
+    scProductId  = productId;
+    scSystemQty  = parseFloat(systemQty);
+    scUnit       = unit || 'pc';
+
+    document.getElementById('scProductName').textContent  = productName;
+    document.getElementById('scSystemQty').textContent    = scSystemQty % 1 === 0
+        ? scSystemQty.toString() : scSystemQty.toFixed(3);
+    document.getElementById('scSystemUnit').textContent   = scUnit;
+    document.getElementById('scActualUnit').textContent   = scUnit;
+    document.getElementById('scActualDisplay').textContent = '—';
+    document.getElementById('scActualInput').value        = '';
+    document.getElementById('scNote').value               = '';
+    document.getElementById('scDiff').innerHTML           = '';
+    document.getElementById('scCodep').value              = productId;
+
+    document.getElementById('stockCountOverlay').style.display = 'flex';
+    setTimeout(() => document.getElementById('scActualInput').focus(), 150);
+}
+
+function closeStockCount() {
+    document.getElementById('stockCountOverlay').style.display = 'none';
+}
+
+function updateScDiff() {
+    var actual = parseFloat(document.getElementById('scActualInput').value);
+    if (isNaN(actual) || actual < 0) {
+        document.getElementById('scActualDisplay').textContent = '—';
+        document.getElementById('scDiff').innerHTML = '';
+        return;
+    }
+
+    var display = actual % 1 === 0 ? actual.toString() : actual.toFixed(3);
+    document.getElementById('scActualDisplay').textContent = display + ' ' + scUnit;
+
+    var diff = actual - scSystemQty;
+    var diffDisplay = Math.abs(diff).toFixed(3);
+    var el = document.getElementById('scDiff');
+
+    if (Math.abs(diff) < 0.001) {
+        el.innerHTML = '<span style="color:#16a34a;">✓ Matches system — no adjustment needed</span>';
+    } else if (diff < 0) {
+        el.innerHTML = '<span style="color:#dc2626;">▼ ' + diffDisplay + ' ' + scUnit +
+            ' shrinkage (system will decrease)</span>';
+    } else {
+        el.innerHTML = '<span style="color:#2563eb;">▲ +' + diffDisplay + ' ' + scUnit +
+            ' surplus (system will increase)</span>';
+    }
+}
+
+document.getElementById('scForm').addEventListener('submit', function(e) {
+    var actual = parseFloat(document.getElementById('scActualInput').value);
+    if (isNaN(actual) || actual < 0) {
+        e.preventDefault();
+        alert('Please enter a valid quantity.');
+        return;
+    }
+    document.getElementById('scActualHidden').value = actual;
+    document.getElementById('scNoteHidden').value   = document.getElementById('scNote').value;
+});
+
+document.getElementById('stockCountOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closeStockCount();
+});
+</script>
+
 </body>
 </html>

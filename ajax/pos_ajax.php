@@ -53,16 +53,21 @@ switch ($action) {
         $cat = trim($_GET['cat'] ?? '');
         $cat_sql = $cat ? "AND category = '" . mysqli_real_escape_string($conn, $cat) . "'" : '';
 
+        // Check if is_weighted column exists (requires pos_weight.sql to have been run)
+        $col_check  = mysqli_query($conn, "SHOW COLUMNS FROM produit LIKE 'is_weighted'");
+        $has_weight = $col_check && mysqli_num_rows($col_check) > 0;
+        $weight_col = $has_weight ? ', is_weighted' : ', 0 AS is_weighted';
+
         if ($raw === '') {
             $res = mysqli_query($conn,
-                "SELECT codep, nomp, price, onhand, unit, category, image, barcode, is_weighted
+                "SELECT codep, nomp, price, onhand, unit, category, image, barcode $weight_col
                  FROM produit WHERE active = 1 $cat_sql
                  ORDER BY nomp LIMIT 500"
             );
         } else {
             $q = '%' . mysqli_real_escape_string($conn, $raw) . '%';
             $res = mysqli_query($conn,
-                "SELECT codep, nomp, price, onhand, unit, category, image, barcode, is_weighted
+                "SELECT codep, nomp, price, onhand, unit, category, image, barcode $weight_col
                  FROM produit
                  WHERE active = 1 $cat_sql
                  AND (nomp LIKE '$q' OR barcode LIKE '$q')
@@ -110,14 +115,13 @@ switch ($action) {
         }
 
         // Items come in as LBP prices — convert to USD for DB storage
+        // All amounts stored in LBP directly — no USD conversion
         $total = 0;
         foreach ($items as $item) {
-            $lbp_price = (float)$item['unit_price'];
-            $usd_price = $lbp_price / $usd_to_lbp;
-            $total += $usd_price * (float)$item['qty'];   // float for weighted items
+            $total += (float)$item['unit_price'] * (float)$item['qty'];
         }
-        $discount_usd = $discount / $usd_to_lbp;  // discount arrives in LBP — convert to USD
-        $final_total  = max(0, $total - $discount_usd); // pre-VAT, stored in USD
+        $discount_lbp = $discount;               // discount arrives in LBP
+        $final_total  = max(0, $total - $discount_lbp); // pre-VAT, stored in LBP
         // change_usd / change_lbp already computed by frontend and passed in POST
 
         // Insert sale header
@@ -125,7 +129,7 @@ switch ($action) {
         try {
             $insert = mysqli_query($conn,
                 "INSERT INTO pos_sales (client_id, client_name, total, discount, final_total, payment_method, currency, notes, agent_id, agent_name, paid_usd, paid_lbp, change_usd, change_lbp, status)
-                 VALUES ($client_id_sql, '$client_name', $total, $discount_usd, $final_total, '$payment_method', '$currency', '$notes', $agent_id, '$agent_name', $paid_usd, $paid_lbp, $change_usd, $change_lbp, 'completed')"
+                 VALUES ($client_id_sql, '$client_name', $total, $discount_lbp, $final_total, '$payment_method', '$currency', '$notes', $agent_id, '$agent_name', $paid_usd, $paid_lbp, $change_usd, $change_lbp, 'completed')"
             );
         } catch (Exception $e) {
             echo json_encode(['success' => false, 'error' => 'DB error: ' . $e->getMessage()]);
@@ -145,9 +149,8 @@ switch ($action) {
             $product_name   = mysqli_real_escape_string($conn, $item['product_name']);
             $qty            = (float)$item['qty'];          // float — supports 0.750 kg
             $is_weighted    = !empty($item['is_weighted']) ? 1 : 0;
-            $unit_price_lbp = (float)$item['unit_price'];
-            $unit_price     = $unit_price_lbp / $usd_to_lbp;
-            $subtotal       = $qty * $unit_price;
+            $unit_price = (float)$item['unit_price'];  // stored in LBP directly
+            $subtotal   = $qty * $unit_price;
 
             mysqli_query($conn,
                 "INSERT INTO pos_sale_items (sale_id, product_id, product_name, qty, unit_price, subtotal)
@@ -186,10 +189,12 @@ switch ($action) {
             $drawer_result = openCashDrawer($conn);
         }
 
+        $usd_equiv = $usd_to_lbp > 0 ? round($final_total / $usd_to_lbp, 2) : 0;
         echo json_encode([
             'success'       => true,
             'sale_id'       => $sale_id,
             'final_total'   => $final_total,
+            'usd_equiv'     => $usd_equiv,
             'print_result'  => $print_result,
             'drawer_result' => $drawer_result
         ]);

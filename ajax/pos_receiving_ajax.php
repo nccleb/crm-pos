@@ -98,7 +98,7 @@ if ($action === "get_last_cost") {
     // Returns the last recorded cost price for a product from previous receivings
     $product_id = (int)($_GET["product_id"] ?? 0);
     $row = $db->query(
-        "SELECT i.cost_price_usd, i.cost_price_lbp, r.received_date, r.supplier_name
+        "SELECT i.cost_price_lbp, r.received_date, r.supplier_name
          FROM stock_receiving_items i
          JOIN stock_receivings r ON r.id = i.receiving_id
          WHERE i.product_id = $product_id AND r.status = 'completed'
@@ -130,13 +130,12 @@ if ($action === "save_receiving") {
 
     $db->begin_transaction();
     try {
-        // Calculate totals
-        $total_usd = 0;
+        // Calculate totals — all in LBP
         $total_lbp = 0;
         foreach ($items as $item) {
-            $total_usd += (float)$item["cost_price_usd"] * (float)$item["qty"];
             $total_lbp += (float)$item["cost_price_lbp"] * (float)$item["qty"];
         }
+        $total_usd = $total_lbp / $exchange_rate; // keep for reference only
 
         // Insert receiving header
         $db->query("INSERT INTO stock_receivings
@@ -152,10 +151,10 @@ if ($action === "save_receiving") {
             $product_id    = (int)$item["product_id"];
             $product_name  = $db->real_escape_string($item["product_name"]);
             $qty           = (float)$item["qty"];
-            $cost_usd      = (float)$item["cost_price_usd"];
             $cost_lbp      = (float)$item["cost_price_lbp"];
-            $subtotal_usd  = $qty * $cost_usd;
+            $cost_usd      = $cost_lbp / $exchange_rate; // reference only
             $subtotal_lbp  = $qty * $cost_lbp;
+            $subtotal_usd  = $qty * $cost_usd;
             $expiry        = !empty($item["expiry_date"])
                              ? "'" . $db->real_escape_string($item["expiry_date"]) . "'"
                              : "NULL";
@@ -176,10 +175,10 @@ if ($action === "save_receiving") {
             $qty_before = $cur ? (float)$cur["onhand"] : 0;
             $qty_after  = $qty_before + $qty;
 
-            // Update product stock + cost price + last received
+            // Update product stock + cost price (stored in LBP) + last received
             $db->query("UPDATE produit SET
                 onhand = onhand + $qty,
-                cost_price = $cost_usd,
+                cost_price = $cost_lbp,
                 last_received_at = NOW()
                 WHERE codep = $product_id");
 
