@@ -15,7 +15,7 @@ if (!$client_id) {
     exit();
 }
 
-$conn = mysqli_connect("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 if (!$conn) {
     echo json_encode(['success' => false, 'error' => 'DB connection failed']);
     exit();

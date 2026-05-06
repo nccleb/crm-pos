@@ -9,7 +9,7 @@ $source_table  = $_GET['table'] ?? 'pos_sales';
 
 if (empty($archive_table)) { header("Location: pos_archive.php"); exit(); }
 
-$conn = mysqli_connect("192.168.1.101","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("172.18.208.1","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
 
 $esc = mysqli_real_escape_string($conn, $archive_table);

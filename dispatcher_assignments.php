@@ -11,7 +11,7 @@ $_SESSION["ooq"] = $idf;
 
 
 
-$idr = mysqli_connect("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+$idr = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 if (mysqli_connect_errno()) {
     echo "Failed to connect to MySQL: " . mysqli_connect_error();
     exit();
@@ -1420,7 +1420,7 @@ async function setupWhatsAppFromTable(driverId, driverName, assignmentId) {
     const host = window.location.host;
     if (host.includes('localhost') || host.includes('127.0.0.1')) {
         const path = window.location.pathname.replace('dispatcher_assignments.php', '');
-        baseUrl = 'https://192.168.1.101' + path;
+        baseUrl = 'https://172.18.208.1' + path;
     }
     
     document.getElementById('baseTrackingUrl').value = baseUrl;

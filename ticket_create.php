@@ -9,7 +9,7 @@ if (!isset($_SESSION["ses"])) {
 $agent = $_SESSION["ses"];
 $contact_id = $_GET['contact'] ?? '';
 
-$idr = mysqli_connect("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+$idr = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 if (mysqli_connect_errno()) {
     die("Failed to connect to MySQL: " . mysqli_connect_error());
 }

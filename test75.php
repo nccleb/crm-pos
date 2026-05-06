@@ -28,7 +28,7 @@ function size(){
 
 function add(){
 	var myw;
-	myw=window.open ("http://192.168.1.101//before.php?page=<?php echo urlencode($naa) ?>&page1=<?php echo urlencode($idf)?>&page2=<?php echo urlencode($inc) ?>","","menubar=0,resizable=1,width=680,height=950");
+	myw=window.open ("http://172.18.208.1//before.php?page=<?php echo urlencode($naa) ?>&page1=<?php echo urlencode($idf)?>&page2=<?php echo urlencode($inc) ?>","","menubar=0,resizable=1,width=680,height=950");
 }
 </script>
 
@@ -158,7 +158,7 @@ if (isset($_POST['la']) && isset($_POST['ur']) && isset($_POST['bu']) && isset($
     }
 
     // Database connection
-    $idr = mysqli_connect("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+    $idr = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
     if (mysqli_connect_errno()) {
         echo "Failed to connect to MySQL: " . mysqli_connect_error();
         exit();

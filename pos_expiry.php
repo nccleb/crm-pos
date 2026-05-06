@@ -9,7 +9,7 @@ $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 $is_super   = ($agent_name === 'super');
 
-$conn = mysqli_connect("192.168.1.101","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("172.18.208.1","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
 
 $today = date('Y-m-d');

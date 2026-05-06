@@ -128,11 +128,11 @@ function printContents(id)
 function openWin() {
    
  
- var popup = window.open ("http://192.168.1.101//test19.php");
+ var popup = window.open ("http://172.18.208.1//test19.php");
  
     $(popup.document).ready(function() {
        
-		popup.window.top.location("http://192.168.1.101//test19.php");
+		popup.window.top.location("http://172.18.208.1//test19.php");
 	});     
 }		
     
@@ -142,7 +142,7 @@ function openWin() {
 <script>
 function leads(){
 	
- window.open ("http://192.168.1.101//test82.php","","menubar=0,resizable=1,width=950,height=750");
+ window.open ("http://172.18.208.1//test82.php","","menubar=0,resizable=1,width=950,height=750");
 	
 }
 </script> 
@@ -166,7 +166,7 @@ function leads(){
 <script>
 function Import(){
 	
- window.open ("http://192.168.1.101//test73.php","","menubar=0,resizable=1,width=480,height=300");
+ window.open ("http://172.18.208.1//test73.php","","menubar=0,resizable=1,width=480,height=300");
 	
 }
 </script> 
@@ -175,7 +175,7 @@ function Import(){
 <script>
 function Export(){
 	
- window.open ("http://192.168.1.101//test72.php","","menubar=0,resizable=1,width=480,height=300");
+ window.open ("http://172.18.208.1//test72.php","","menubar=0,resizable=1,width=480,height=300");
 	
 }
 </script> 
@@ -202,14 +202,14 @@ function Export(){
 <script>
 function search(){
 	
- window.open ("http://192.168.1.101//search.php","","menubar=0,resizable=1,width=480,height=620");
+ window.open ("http://172.18.208.1//search.php","","menubar=0,resizable=1,width=480,height=620");
 	
 }
 </script> 
 <script>
 function number(){
 	
- window.open ("http://192.168.1.101//numbersearch.php","","menubar=0,resizable=1,width=480,height=435");
+ window.open ("http://172.18.208.1//numbersearch.php","","menubar=0,resizable=1,width=480,height=435");
 	
 }
 </script> 
@@ -217,7 +217,7 @@ function number(){
 <script>
 function ImportSql(){
 	
- window.open ("http://192.168.1.101//test38.php","","menubar=0,resizable=1,width=480,height=300");
+ window.open ("http://172.18.208.1//test38.php","","menubar=0,resizable=1,width=480,height=300");
 	
 }
 </script> 
@@ -225,7 +225,7 @@ function ImportSql(){
 <script>
 function bb(){
 	
- window.open ("http://192.168.1.101//test42.php","","menubar=0,resizable=1,width=480,height=300");
+ window.open ("http://172.18.208.1//test42.php","","menubar=0,resizable=1,width=480,height=300");
 	
 }
 </script> 
@@ -236,7 +236,7 @@ function add(){
 	var myw;
 	
    
-	myw=window.open ("http://192.168.1.101//test56.php?page=<?php echo $nam ?>&page1=<?php echo $idf ?>&page2=<?php echo $num9 ?>","","menubar=0,resizable=1,width=450,height=800");
+	myw=window.open ("http://172.18.208.1//test56.php?page=<?php echo $nam ?>&page1=<?php echo $idf ?>&page2=<?php echo $num9 ?>","","menubar=0,resizable=1,width=450,height=800");
 }
 </script> 
 
@@ -245,7 +245,7 @@ function add2(){
 	var myw;
 	
   
-	myw=window.open ("http://192.168.1.101//test276.php?page=<?php echo $nam ?>&page1=<?php echo $idf ?>&page2=<?php echo $num9 ?>","","menubar=0,resizable=1,width=450,height=800");
+	myw=window.open ("http://172.18.208.1//test276.php?page=<?php echo $nam ?>&page1=<?php echo $idf ?>&page2=<?php echo $num9 ?>","","menubar=0,resizable=1,width=450,height=800");
 }
 </script> 
 
@@ -269,14 +269,14 @@ function quit(){
 <script>
 function del(){
 	
- window.open ("http://192.168.1.101//test68.php","","menubar=0,resizable=1,width=480,height=350");
+ window.open ("http://172.18.208.1//test68.php","","menubar=0,resizable=1,width=480,height=350");
 	
 }
 </script> 
 <script>
 function delAll(){
 	
- window.open ("http://192.168.1.101//test77.php","","menubar=0,resizable=1,width=480,height=350");
+ window.open ("http://172.18.208.1//test77.php","","menubar=0,resizable=1,width=480,height=350");
 	
 }
 </script> 
@@ -303,7 +303,7 @@ function update(){
 	var myw;
 	
    
-	myw=window.open ("http://192.168.1.101//before.php?pag=<?php echo $nam ?>&pag1=<?php echo $idf ?>&pag2=<?php echo $num9 ?>","","menubar=0,resizable=1,width=500,height=800");
+	myw=window.open ("http://172.18.208.1//before.php?pag=<?php echo $nam ?>&pag1=<?php echo $idf ?>&pag2=<?php echo $num9 ?>","","menubar=0,resizable=1,width=500,height=800");
 }
 </script> 
 

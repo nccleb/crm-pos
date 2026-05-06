@@ -65,7 +65,7 @@ if (file_exists($opic)) {
 
 $inc = $_SESSION["userinc"];
 
-$idr = mysqli_connect("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+$idr = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 if (mysqli_connect_errno()) {
   echo "Failed to connect to MySQL: " . mysqli_connect_error();
   exit();
@@ -762,7 +762,7 @@ document.getElementById('deleteAllModal').addEventListener('click', function(e) 
 if (!empty($id)) {
     try {
         $cid = (int)$id;
-        $pos_conn = mysqli_connect("192.168.1.101","root","1Sys9Admeen72","nccleb_test");
+        $pos_conn = mysqli_connect("172.18.208.1","root","1Sys9Admeen72","nccleb_test");
         if (!$pos_conn) throw new Exception("POS DB connection failed");
         mysqli_set_charset($pos_conn,'utf8mb4');
 

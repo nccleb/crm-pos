@@ -1,6 +1,6 @@
 <?php
 header('Content-Type: application/json');
-$host="192.168.1.101"; $user="root"; $pass="1Sys9Admeen72"; $db="nccleb_test";
+$host="172.18.208.1"; $user="root"; $pass="1Sys9Admeen72"; $db="nccleb_test";
 $conn=mysqli_connect($host,$user,$pass,$db);
 if(!$conn){ echo json_encode(['success'=>false,'error'=>'DB connection failed']); exit; }
 

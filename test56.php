@@ -20,7 +20,7 @@ error_log("test56.php - Agent ID: " . $agent_id . " | From GET page: " . ($_GET[
 date_default_timezone_set('Asia/Beirut');
 
 // Database connection
-$idr = new mysqli("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+$idr = new mysqli("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 if ($idr->connect_error) {
     die("Database connection failed: " . $idr->connect_error);
 }

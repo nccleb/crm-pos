@@ -48,7 +48,7 @@ if (!is_array($data) || empty($data)) {
 }
 
 // Database connection
-$host = "192.168.1.101";
+$host = "172.18.208.1";
 $user = "root";
 $pass = "1Sys9Admeen72";
 $db = "nccleb_test";

@@ -4,7 +4,7 @@ if (empty($_SESSION['oop'])) { header("Location: login200.php"); exit(); }
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 
-$conn = mysqli_connect("192.168.1.101","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("172.18.208.1","root","1Sys9Admeen72","nccleb_test");
 $co = mysqli_fetch_assoc(mysqli_query($conn, "SELECT usd_to_lbp, vat_rate FROM company_settings LIMIT 1"));
 $usd_to_lbp = (float)($co['usd_to_lbp'] ?? 89500);
 $vat_rate   = (float)($co['vat_rate']   ?? 0);
@@ -112,9 +112,6 @@ tr:hover td { background:#fafafa; }
     <h1>Sales History</h1>
     <a class="ml" href="pos.php"><i class="fas fa-cash-register"></i> POS</a>
     <a href="pos_products.php"><i class="fas fa-box"></i> Products</a>
-    <a href="pos_receiving.php"><i class="fas fa-truck-loading"></i> Receiving</a>
-    <a href="pos_expiry.php"><i class="fas fa-calendar-times"></i> Expiry</a>
-    <a href="pos_suppliers.php"><i class="fas fa-building"></i> Suppliers</a>
     <a href="pos_closing.php"><i class="fas fa-cash-register"></i> Closing</a>
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
     <a href="test204.php?page=<?= urlencode($agent_name) ?>&page1=<?= $agent_id ?>"><i class="fas fa-arrow-left"></i> CRM</a>
@@ -125,10 +122,10 @@ tr:hover td { background:#fafafa; }
 <!-- Stats -->
 <div class="stats">
     <div class="stat"><div class="val"><?= $stats['total_sales'] ?></div><div class="lbl">Total Sales</div></div>
-    <div class="stat green"><div class="val">LL <?= number_format(round(($stats['revenue'] ?? 0) * (1 + $vat_rate/100) * $usd_to_lbp), 0) ?></div><div class="lbl">Revenue (incl. VAT)</div></div>
-    <div class="stat orange"><div class="val">LL <?= number_format(round(($stats['total_discount'] ?? 0) * $usd_to_lbp), 0) ?></div><div class="lbl">Discounts Given</div></div>
-    <div class="stat"><div class="val">LL <?= number_format(round(($stats['cash_total'] ?? 0) * (1 + $vat_rate/100) * $usd_to_lbp), 0) ?></div><div class="lbl">Cash Collected</div></div>
-    <div class="stat red"><div class="val">LL <?= number_format(round(($stats['credit_total'] ?? 0) * (1 + $vat_rate/100) * $usd_to_lbp), 0) ?></div><div class="lbl">On Credit</div></div>
+    <div class="stat green"><div class="val">LL <?= number_format(round(($stats['revenue'] ?? 0) * (1 + $vat_rate/100)), 0) ?></div><div class="lbl">Revenue (incl. VAT)</div></div>
+    <div class="stat orange"><div class="val">LL <?= number_format(round($stats['total_discount'] ?? 0), 0) ?></div><div class="lbl">Discounts Given</div></div>
+    <div class="stat"><div class="val">LL <?= number_format(round(($stats['cash_total'] ?? 0) * (1 + $vat_rate/100)), 0) ?></div><div class="lbl">Cash Collected</div></div>
+    <div class="stat red"><div class="val">LL <?= number_format(round(($stats['credit_total'] ?? 0) * (1 + $vat_rate/100)), 0) ?></div><div class="lbl">On Credit</div></div>
 </div>
 
 <div class="card">
@@ -169,8 +166,8 @@ tr:hover td { background:#fafafa; }
                 <td><?= $s['item_count'] ?> item(s)</td>
                 <td><span class="badge pay-<?= $s['payment_method'] ?>"><?= ucfirst(str_replace('_',' ',$s['payment_method'])) ?></span></td>
                 <td><?= $s['currency'] ?></td>
-                <td><?= $s['discount'] > 0 ? '-LL '.number_format(round($s['discount']*$usd_to_lbp),0) : '—' ?></td>
-                <td><strong>LL <?= number_format(round(round((float)$s['final_total'] * (1 + $vat_rate/100) * $usd_to_lbp / 5000) * 5000), 0) ?></strong></td>
+                <td><?= $s['discount'] > 0 ? '-LL '.number_format(round($s['discount']),0) : '—' ?></td>
+                <td><strong>LL <?= number_format(round(round((float)$s['final_total'] * (1 + $vat_rate/100) / 5000) * 5000), 0) ?></strong></td>
                 <td><?= htmlspecialchars($s['agent_name']) ?></td>
                 <td>
                     <button class="btn btn-blue" style="padding:6px 12px;font-size:12px;" onclick="viewSale(<?= $s['id'] ?>)">
@@ -223,18 +220,18 @@ function viewSale(id) {
 
             html += '<table class="items-table"><thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead><tbody>';
             items.forEach(function(item) {
-                var unitLbp    = Math.round(parseFloat(item.unit_price) * USD_TO_LBP);
-                var subtotalLbp = Math.round(parseFloat(item.subtotal) * USD_TO_LBP);
+                var unitLbp    = Math.round(parseFloat(item.unit_price));
+                var subtotalLbp = Math.round(parseFloat(item.subtotal));
                 html += '<tr><td>' + escHtml(item.product_name) + '</td><td>' + item.qty + '</td>'
                       + '<td>LL ' + unitLbp.toLocaleString() + '</td>'
                       + '<td>LL ' + subtotalLbp.toLocaleString() + '</td></tr>';
             });
             html += '</tbody></table>';
 
-            var grossLbp    = Math.round(parseFloat(s.total)       * USD_TO_LBP);
-            var discountLbp = Math.round(parseFloat(s.discount)    * USD_TO_LBP);
-            var taxBaseLbp  = Math.round(parseFloat(s.final_total) * USD_TO_LBP);  // post-discount pre-VAT
-            var vatAmt      = Math.round(parseFloat(s.final_total) * (VAT_RATE/100) * USD_TO_LBP);
+            var grossLbp    = Math.round(parseFloat(s.total));
+            var discountLbp = Math.round(parseFloat(s.discount));
+            var taxBaseLbp  = Math.round(parseFloat(s.final_total));  // post-discount pre-VAT, LBPe-VAT
+            var vatAmt      = Math.round(parseFloat(s.final_total) * (VAT_RATE/100));
             var exactTotal  = taxBaseLbp + vatAmt;                                  // exact — no auto-rounding
             var dueLbp      = Math.round(exactTotal / 5000) * 5000;                 // rounded to LL 5,000
             var rounding    = dueLbp - exactTotal;                                   // +/- diff

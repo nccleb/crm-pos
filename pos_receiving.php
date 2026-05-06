@@ -11,7 +11,7 @@ $agent_name = $_SESSION["oop"];
 $is_super   = ($agent_name === "super");
 
 // Get exchange rate + company settings
-$db = new mysqli("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+$db = new mysqli("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 $db->set_charset("utf8mb4");
 $settings   = $db->query("SELECT usd_to_lbp FROM company_settings LIMIT 1")->fetch_assoc();
 $usd_to_lbp = $settings ? (float)$settings["usd_to_lbp"] : 89700;
@@ -113,6 +113,7 @@ body  { background:#f1f5f9; font-size:.9rem; }
     <a href="pos.php"><i class="bi bi-cart3"></i> POS</a>
     <a href="pos_suppliers.php"><i class="bi bi-building"></i> Suppliers</a>
     <a href="pos_expiry.php"><i class="bi bi-calendar-x"></i> Expiry</a>
+    <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
     <a href="pos_products.php"><i class="bi bi-box-seam"></i> Products</a>
     <a href="pos_stock.php"><i class="bi bi-graph-up"></i> Stock</a>
     <?php if($is_super): ?>
@@ -278,7 +279,7 @@ body  { background:#f1f5f9; font-size:.9rem; }
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 // ── State ──────────────────────────────────────────────────
-let items       = [];   // [{product_id, product_name, qty, cost_price_usd, cost_price_lbp, expiry_date, notes, last_cost_usd}]
+let items       = [];   // [{product_id, product_name, qty, cost_price_lbp, expiry_date, notes, last_cost_lbp}]
 let suppliers   = [];
 let searchTimer = null;
 const detailModal = new bootstrap.Modal(document.getElementById('detailModal'));
@@ -485,7 +486,7 @@ function removeItem(idx) {
 }
 
 function recalcAll() {
-  let totalUsd = 0, totalLbp = 0, totalUnits = 0;
+  let totalLbp = 0, totalUnits = 0;
   items.forEach(i => {
     totalLbp   += i.qty * i.cost_price_lbp;
     totalUnits += i.qty;
@@ -544,7 +545,7 @@ async function saveReceiving() {
   showMsg('success',
     `✓ Receiving #${data.receiving_id} saved. ` +
     `Stock updated for ${items.length} product(s). ` +
-    `Total cost: $${data.total_usd} / LL ${parseInt(data.total_lbp).toLocaleString()}`
+    `Total cost: LL ${parseInt(data.total_lbp).toLocaleString()}`
   );
   clearAll();
   loadHistory();
@@ -631,7 +632,7 @@ async function showDetail(id) {
       <td>${esc(i.product_name)}</td>
       <td class="text-end">${parseFloat(i.qty_received)}</td>
       <td class="text-end">LL ${Math.round(i.cost_price_lbp).toLocaleString()}</td>
-      <td class="text-end">$${parseFloat(i.subtotal_usd).toFixed(2)}</td>
+      <td class="text-end">LL ${Math.round(i.subtotal_lbp).toLocaleString()}</td>
       <td class="text-center">${i.expiry_date || '—'}</td>
       <td>${esc(i.notes||'')}</td>
     </tr>

@@ -5,7 +5,7 @@ if (empty($_SESSION['oop'])) { header("Location: login200.php"); exit(); }
 $sale_id = (int)($_GET['id'] ?? 0);
 if (!$sale_id) { echo "Invalid sale ID."; exit(); }
 
-$conn = mysqli_connect("192.168.1.101","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("172.18.208.1","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
 
 $sale = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM pos_sales WHERE id = $sale_id LIMIT 1"));

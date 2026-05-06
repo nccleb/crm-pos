@@ -53,6 +53,7 @@ $is_super    = ($agent_name === "super");
     <a href="pos.php"><i class="bi bi-cart3"></i> POS</a>
     <a href="pos_receiving.php"><i class="bi bi-box-arrow-in-down"></i> Receiving</a>
     <a href="pos_products.php"><i class="bi bi-box-seam"></i> Products</a>
+    <a href="pos_promotions.php"><i class="bi bi-tags"></i> Promotions</a>
     <?php if($is_super): ?>
     <a href="pos_settings.php"><i class="bi bi-gear"></i> Settings</a>
     <?php endif; ?>

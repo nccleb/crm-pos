@@ -9,7 +9,7 @@ if (!isset($_SESSION["oop"]) || empty($_SESSION["oop"])) {
 }
 
 // Database connection
-$idr = mysqli_connect("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+$idr = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 if (mysqli_connect_errno()) {
     http_response_code(500);
     echo json_encode(['error' => 'Database connection failed: ' . mysqli_connect_error()]);

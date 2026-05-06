@@ -125,7 +125,7 @@ class TrialManager {
 
 // Usage example in your main files
 session_start();
-$idr = mysqli_connect("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+$idr = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 $trial_manager = new TrialManager($idr);
 
 // Get client ID from session or URL parameter

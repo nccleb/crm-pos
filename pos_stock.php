@@ -4,7 +4,7 @@ if (empty($_SESSION['oop'])) { header("Location: login200.php"); exit(); }
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 
-$conn = mysqli_connect("192.168.1.101","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("172.18.208.1","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
 
 // Filters
@@ -121,6 +121,7 @@ tr:hover td { background:#fafafa; }
     <a href="pos_sales.php"><i class="fas fa-history"></i> Sales</a>
     <a href="pos_receiving.php"><i class="fas fa-truck-loading"></i> Receiving</a>
     <a href="pos_expiry.php"><i class="fas fa-calendar-times"></i> Expiry</a>
+    <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
     <a href="pos_suppliers.php"><i class="fas fa-building"></i> Suppliers</a>
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
     <a href="test204.php?page=<?= urlencode($agent_name) ?>&page1=<?= $agent_id ?>"><i class="fas fa-arrow-left"></i> CRM</a>

@@ -8,7 +8,7 @@ $agent_name = $_SESSION['oop'];
 $agent_id   = (int)$_SESSION['ooq'];
 
 // DB for settings
-$conn = mysqli_connect("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 mysqli_set_charset($conn, 'utf8mb4');
 
 // Load categories
@@ -289,6 +289,8 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
     <?php if ($agent_name === 'super'): ?>
     <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
+    
+    <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
     <?php endif; ?>
     <a href="test204.php?page=<?= urlencode($agent_name) ?>&page1=<?= $agent_id ?>"><i class="fas fa-arrow-left"></i> Back to CRM</a>
 </div>
@@ -550,6 +552,16 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
 <script>
 // ── State ─────────────────────────────────────────────────────────────────
 var cart             = [];
+var activePromos     = [];   // loaded from pos_promotions_ajax.php
+
+// Load active promotions on page load
+async function loadPromotions() {
+    try {
+        const res  = await fetch('ajax/pos_promotions_ajax.php?action=get_active');
+        const data = await res.json();
+        activePromos = data.promotions || [];
+    } catch(e) { activePromos = []; }
+}
 var currentSaleId    = null;
 var selectedClientId   = null;
 var selectedClientName = 'Walk-in Customer';
@@ -624,6 +636,10 @@ function loadProducts(query, category, autoAdd, showAll) {
                     priceLabel = 'LL ' + lbpPrice.toLocaleString();
                     clickFn    = outOfStock ? '' : 'addToCart(' + p.codep + ',' + JSON.stringify(p.nomp) + ',' + lbpPrice + ',false,' + JSON.stringify(unit) + ')';
                     weightBadge = '';
+                    var promoForProduct2 = getPromoForProduct(p.codep, p.category || '');
+                    if (promoForProduct2 && !p.is_weighted) {
+                        weightBadge = '<span style=\'position:absolute;top:5px;left:5px;background:#dc2626;color:#fff;font-size:9px;font-weight:800;padding:2px 6px;border-radius:10px;\'>' + promoLabel(promoForProduct2) + '</span>';
+                    }
                 }
 
                 var imgHtml = p.image
@@ -690,17 +706,19 @@ document.querySelectorAll('.cat-btn').forEach(btn => {
 });
 
 // ── Cart ──────────────────────────────────────────────────────────────────
-function addToCart(productId, productName, unitPrice, isWeighted, unit) {
+function addToCart(productId, productName, unitPrice, isWeighted, unit, category) {
     if (isWeighted) {
-        // Weighted items — never merge, always a new line (each weighing is unique)
-        return; // should be called via addWeightedToCart instead
+        return; // use addWeightedToCart instead
     }
     var existing = cart.find(i => i.product_id === productId && !i.is_weighted);
-    if (existing) { existing.qty++; } else {
+    if (existing) { existing.qty++; }
+    else {
         cart.push({ product_id: productId, product_name: productName,
                     unit_price: parseFloat(unitPrice), qty: 1,
-                    is_weighted: false, unit: unit || 'pc' });
+                    is_weighted: false, unit: unit || 'pc',
+                    category: category || '' });
     }
+    applyPromotions();
     renderCart();
 }
 
@@ -709,6 +727,7 @@ function addWeightedToCart(productId, productName, unitPrice, weightKg, unit) {
     cart.push({ product_id: productId, product_name: productName,
                 unit_price: parseFloat(unitPrice), qty: weightKg,
                 is_weighted: true, unit: unit || 'kg' });
+    applyPromotions();
     renderCart();
 }
 
@@ -747,10 +766,19 @@ function renderCart() {
                 '</div>' +
             '</div>';
         } else {
-            return '<div class="cart-item">' +
+            var promoTag = item.promo_label
+                ? '<span style="font-size:10px;background:#dc2626;color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px;font-weight:700;">' + item.promo_label + '</span>'
+                : '';
+            var freeTag = item.is_promo_free
+                ? '<span style="font-size:10px;background:#16a34a;color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px;font-weight:700;">FREE</span>'
+                : '';
+            var priceDisplay = item.is_promo_free
+                ? '<span style="text-decoration:line-through;color:#94a3b8;">LL ' + Math.round(item.unit_price).toLocaleString() + '</span> FREE'
+                : 'LL ' + Math.round(item.unit_price).toLocaleString() + ' / ' + (item.unit || 'pc');
+            return '<div class="cart-item"' + (item.is_promo_free ? ' style="border-left:3px solid #16a34a;"' : item.promo_label ? ' style="border-left:3px solid #dc2626;"' : '') + '>' +
                 '<div class="cart-item-top">' +
-                    '<div class="item-name">' + escHtml(item.product_name) + '</div>' +
-                    '<div class="item-unit-price">LL ' + Math.round(item.unit_price).toLocaleString() + ' / ' + (item.unit || 'pc') + '</div>' +
+                    '<div class="item-name">' + escHtml(item.product_name) + promoTag + freeTag + '</div>' +
+                    '<div class="item-unit-price">' + priceDisplay + '</div>' +
                 '</div>' +
                 '<div class="cart-item-bottom">' +
                     '<div class="qty-control">' +
@@ -767,8 +795,8 @@ function renderCart() {
     updateTotals();
 }
 
-function changeQty(idx, delta) { if(!cart[idx].is_weighted) { cart[idx].qty = Math.max(1, cart[idx].qty + delta); renderCart(); } }
-function setQty(idx, val) { if(!cart[idx].is_weighted) { cart[idx].qty = Math.max(1, parseInt(val) || 1); renderCart(); } }
+function changeQty(idx, delta) { if(!cart[idx].is_weighted) { cart[idx].qty = Math.max(1, cart[idx].qty + delta); applyPromotions(); renderCart(); } }
+function setQty(idx, val) { if(!cart[idx].is_weighted) { cart[idx].qty = Math.max(1, parseInt(val) || 1); applyPromotions(); renderCart(); } }
 function removeItem(idx) { cart.splice(idx, 1); renderCart(); }
 function reweighItem(idx) {
     var item = cart[idx];
@@ -1300,6 +1328,7 @@ fetch('ajax/pos_ajax.php?action=search_products&q=')
 loadProducts('', 'all', false, true);
 window.addEventListener('load', function() {
     loadProducts('', 'all', false, true);
+    loadPromotions();
     searchInput.focus();
 });
 </script>
@@ -1458,8 +1487,13 @@ function confirmWeight() {
     var raw = parseFloat(document.getElementById('wInput').value);
     if (!raw || raw <= 0 || !wProductId) return;
     var weightKg = wInputUnit === 'g' ? raw / 1000 : raw;
+    // Capture all values BEFORE closeWeightModal() resets them to null
+    var pid   = wProductId;
+    var pname = wProductName;
+    var price = wPricePerKg;
+    var unit  = wUnit;
     closeWeightModal();
-    addWeightedToCart(wProductId, wProductName, wPricePerKg, parseFloat(weightKg.toFixed(3)), wUnit);
+    addWeightedToCart(pid, pname, price, parseFloat(weightKg.toFixed(3)), unit);
 }
 
 // ── Numpad ────────────────────────────────────────────────
@@ -1479,6 +1513,176 @@ function numKey(k) {
 document.getElementById('weightModalOverlay').addEventListener('click', function(e) {
     if (e.target === this) closeWeightModal();
 });
+</script>
+
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// PROMOTIONS ENGINE
+// ═══════════════════════════════════════════════════════════
+
+// Get the applicable promotion for a product (by ID or category)
+function getPromoForProduct(productId, category) {
+    const today = new Date().toISOString().split('T')[0];
+    return activePromos.find(p => {
+        if (!p.active) return false;
+        if (p.date_from && p.date_from > today) return false;
+        if (p.date_to   && p.date_to   < today) return false;
+        if (p.type === 'bundle') return false; // bundles handled separately
+        if (p.apply_to === 'product')  return p.product_id == productId;
+        if (p.apply_to === 'category') return p.category && category &&
+            p.category.toLowerCase() === category.toLowerCase();
+        return false;
+    });
+}
+
+// Human-readable label for promo badge on product card
+function promoLabel(promo) {
+    if (!promo) return '';
+    if (promo.type === 'percentage')   return '-' + promo.discount_value + '%';
+    if (promo.type === 'bogo')         return 'B' + promo.buy_qty + 'G' + promo.free_qty;
+    if (promo.type === 'fixed_amount') return '-LL' + parseFloat(promo.discount_value).toLocaleString();
+    return 'PROMO';
+}
+
+// Apply all active promotions to the cart
+// This runs after every cart change and modifies prices/adds free items
+function applyPromotions() {
+    // 1. Remove all previously auto-added free items
+    cart = cart.filter(i => !i.is_promo_free && !i.is_bundle_item);
+
+    // 2. Reset all promotional discounts (restore original prices)
+    cart.forEach(i => {
+        if (i.original_price !== undefined) {
+            i.unit_price = i.original_price;
+            delete i.original_price;
+        }
+        delete i.promo_label;
+        delete i.promo_discount;
+    });
+
+    const today = new Date().toISOString().split('T')[0];
+
+    // 3. Apply each active promotion
+    activePromos.forEach(promo => {
+        if (!promo.active) return;
+        if (promo.date_from && promo.date_from > today) return;
+        if (promo.date_to   && promo.date_to   < today) return;
+
+        if (promo.type === 'percentage') {
+            applyPercentage(promo);
+        } else if (promo.type === 'bogo') {
+            applyBogo(promo);
+        } else if (promo.type === 'bundle') {
+            applyBundle(promo);
+        } else if (promo.type === 'fixed_amount') {
+            applyFixedAmount(promo);
+        }
+    });
+}
+
+// PERCENTAGE: reduce unit_price by X%
+function applyPercentage(promo) {
+    cart.forEach(item => {
+        if (item.is_promo_free || item.is_bundle_item) return;
+        var match = false;
+        if (promo.apply_to === 'product')  match = item.product_id == promo.product_id;
+        if (promo.apply_to === 'category') match = item.category &&
+            promo.category && item.category.toLowerCase() === promo.category.toLowerCase();
+        if (!match) return;
+        item.original_price = item.original_price || item.unit_price;
+        var discount = item.original_price * (parseFloat(promo.discount_value) / 100);
+        item.unit_price   = Math.round(item.original_price - discount);
+        item.promo_label  = '-' + promo.discount_value + '%';
+        item.promo_name   = promo.name;
+        item.promo_discount = Math.round(discount * item.qty);
+    });
+}
+
+// FIXED AMOUNT: subtract fixed LBP amount
+function applyFixedAmount(promo) {
+    cart.forEach(item => {
+        if (item.is_promo_free || item.is_bundle_item) return;
+        var match = promo.apply_to === 'product'
+            ? item.product_id == promo.product_id
+            : (item.category && promo.category &&
+               item.category.toLowerCase() === promo.category.toLowerCase());
+        if (!match) return;
+        item.original_price = item.original_price || item.unit_price;
+        item.unit_price   = Math.max(0, Math.round(item.original_price - parseFloat(promo.discount_value)));
+        item.promo_label  = '-LL ' + parseFloat(promo.discount_value).toLocaleString();
+        item.promo_name   = promo.name;
+        item.promo_discount = Math.min(parseFloat(promo.discount_value), item.original_price) * item.qty;
+    });
+}
+
+// BOGO: for every buy_qty units, add free_qty free items
+function applyBogo(promo) {
+    var cartItem = cart.find(i => i.product_id == promo.product_id && !i.is_promo_free);
+    if (!cartItem) return;
+    var sets     = Math.floor(cartItem.qty / parseInt(promo.buy_qty));
+    if (sets < 1) return;
+    var freeQty  = sets * parseInt(promo.free_qty);
+    // Add free items as separate cart line
+    cart.push({
+        product_id:    cartItem.product_id,
+        product_name:  cartItem.product_name,
+        unit_price:    0,
+        qty:           freeQty,
+        is_weighted:   false,
+        unit:          cartItem.unit,
+        is_promo_free: true,
+        promo_name:    promo.name,
+        promo_label:   'FREE (x' + freeQty + ')',
+    });
+    cartItem.promo_label = 'Buy ' + promo.buy_qty + ' Get ' + promo.free_qty;
+    cartItem.promo_name  = promo.name;
+}
+
+// BUNDLE: if all bundle products are in cart with required qty, apply bundle price
+function applyBundle(promo) {
+    if (!promo.bundle_items || !promo.bundle_price) return;
+    var items = Array.isArray(promo.bundle_items) ? promo.bundle_items : JSON.parse(promo.bundle_items);
+
+    // Check all bundle items are present with enough qty
+    var allPresent = items.every(bi => {
+        var cartItem = cart.find(i => i.product_id == bi.product_id && !i.is_promo_free && !i.is_bundle_item);
+        return cartItem && cartItem.qty >= parseInt(bi.qty);
+    });
+    if (!allPresent) return;
+
+    // Calculate regular total of bundle items
+    var regularTotal = 0;
+    items.forEach(bi => {
+        var cartItem = cart.find(i => i.product_id == bi.product_id && !i.is_promo_free && !i.is_bundle_item);
+        if (cartItem) regularTotal += cartItem.unit_price * parseInt(bi.qty);
+    });
+
+    var bundlePrice   = parseFloat(promo.bundle_price);
+    var savings       = Math.max(0, regularTotal - bundlePrice);
+    if (savings <= 0) return; // bundle isn't cheaper
+
+    // Mark each bundle item and reduce proportionally
+    var ratio = bundlePrice / regularTotal;
+    items.forEach(bi => {
+        var cartItem = cart.find(i => i.product_id == bi.product_id && !i.is_promo_free && !i.is_bundle_item);
+        if (!cartItem) return;
+        cartItem.original_price  = cartItem.original_price || cartItem.unit_price;
+        cartItem.unit_price      = Math.round(cartItem.original_price * ratio);
+        cartItem.is_bundle_item  = true;
+        cartItem.promo_label     = 'Bundle';
+        cartItem.promo_name      = promo.name;
+    });
+}
+
+// ── Cart rendering enhancement — show promo tag ────────────
+// Patch into existing renderCart by extending item display
+var _origRenderCart = renderCart;
+renderCart = function() {
+    _origRenderCart();
+    // After render, inject promo labels into cart items
+    // (handled inline below in cart item HTML)
+};
 </script>
 
 </body>

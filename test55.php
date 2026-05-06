@@ -117,7 +117,7 @@ $decision_authority = test_input($_POST['decision_authority']);
 $communication_style = test_input($_POST['communication_style']);
 
 // Database connection
-$idr = mysqli_connect("192.168.1.101", "root", "1Sys9Admeen72", "nccleb_test");
+$idr = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 if (mysqli_connect_errno()) {
     die("Database connection failed: " . mysqli_connect_error());
 }
@@ -348,7 +348,7 @@ mysqli_close($idr);
             <p class="status-subtitle">Client information has been successfully updated in the system.</p>
             
             <div class="action-buttons">
-                <button class="btn btn-success" onclick="window.open('http://192.168.1.101/test275.php?page=<?php echo urlencode($naa); ?>&page1=<?php echo urlencode($idf); ?>&page2=<?php echo urlencode($inc); ?>','','menubar=0,resizable=1,width=680,height=950')">
+                <button class="btn btn-success" onclick="window.open('http://172.18.208.1/test275.php?page=<?php echo urlencode($naa); ?>&page1=<?php echo urlencode($idf); ?>&page2=<?php echo urlencode($inc); ?>','','menubar=0,resizable=1,width=680,height=950')">
                     <span>✏️</span> Edit Another Client
                 </button>
                 <button class="btn btn-secondary" onclick="window.close()">
