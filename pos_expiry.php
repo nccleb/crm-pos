@@ -311,7 +311,9 @@ tr.same-product > td:first-child { padding-left:2rem; border-left:3px solid #e2e
       <tr class="exp-row <?= $same ? 'same-product row-'.$status : 'row-'.$status ?>"
           data-status="<?= $status ?>"
           data-name="<?= htmlspecialchars(strtolower($b['product_name'])) ?>"
-          data-product-id="<?= $b['product_id'] ?>">
+          data-product-id="<?= $b['product_id'] ?>"
+          data-batch-id="<?= $b['batch_id'] ?? '' ?>"
+          data-source="<?= $b['source'] ?>">
         <td>
           <div class="product-name">
             <?= htmlspecialchars($b['product_name']) ?>
@@ -337,7 +339,7 @@ tr.same-product > td:first-child { padding-left:2rem; border-left:3px solid #e2e
           </button>
           <?php endif; ?>
           <?php if ($days < 0): ?>
-          <button class="btn-act btn-pulled" onclick="pullProduct(<?= $b['product_id'] ?>, '<?= htmlspecialchars(addslashes($b['product_name'])) ?>')">
+          <button class="btn-act btn-pulled" onclick="pullProduct(<?= $b['product_id'] ?>, '<?= htmlspecialchars(addslashes($b['product_name'])) ?>', '<?= $b['batch_id'] ?? '' ?>', '<?= $b['source'] ?>')">
             <i class="fas fa-times-circle"></i> Pull
           </button>
           <?php endif; ?>
@@ -387,22 +389,52 @@ function goDiscount(productId) {
   window.open('pos_products.php?edit=' + productId, '_blank');
 }
 
-function pullProduct(productId, name) {
-  if (!confirm(`Pull "${name}" from shelf?\n\nThis will DEACTIVATE the product so it no longer appears at the POS.\n\nMake sure ALL batches of this product are expired before pulling.`)) return;
-  fetch('ajax/pos_receiving_ajax.php', {
-    method: 'POST',
-    headers: {'Content-Type':'application/x-www-form-urlencoded'},
-    body: 'action=deactivate_product&product_id=' + productId
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.success) {
-      document.querySelectorAll('[data-product-id="' + productId + '"]').forEach(r => r.remove());
-      alert('"' + name + '" has been deactivated and removed from POS.');
-    } else {
-      alert('Error: ' + (data.error || 'Could not deactivate'));
-    }
-  });
+function pullProduct(productId, name, batchId, source) {
+  // Count non-expired batches for the same product still in the table
+  const allRows       = document.querySelectorAll('[data-product-id="' + productId + '"]');
+  const nonExpired    = Array.from(allRows).filter(r => r.dataset.status !== 'expired');
+
+  if (nonExpired.length > 0) {
+    // Other valid batches exist — only remove this expired batch row, keep product active
+    if (!confirm(
+      'Pull expired batch of "' + name + '" from shelf?\n\n' +
+      'This product has ' + nonExpired.length + ' other valid batch(es) — ' +
+      'the product will STAY ACTIVE at the POS.\n\n' +
+      'Only this expired batch will be removed from tracking.'
+    )) return;
+
+    // Remove only the expired rows for this product (there may be >1 expired batch)
+    Array.from(allRows)
+      .filter(r => r.dataset.status === 'expired')
+      .forEach(r => r.remove());
+
+    applyFilters();
+    alert('Expired batch removed from tracking. Product remains active at POS.');
+
+  } else {
+    // All batches for this product are expired — safe to deactivate the whole product
+    if (!confirm(
+      'Pull "' + name + '" from shelf?\n\n' +
+      'All batches of this product are expired.\n' +
+      'This will DEACTIVATE the product so it no longer appears at the POS.'
+    )) return;
+
+    fetch('ajax/pos_receiving_ajax.php', {
+      method: 'POST',
+      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      body: 'action=deactivate_product&product_id=' + productId
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) {
+        document.querySelectorAll('[data-product-id="' + productId + '"]').forEach(r => r.remove());
+        applyFilters();
+        alert('"' + name + '" has been deactivated and removed from POS.');
+      } else {
+        alert('Error: ' + (data.error || 'Could not deactivate'));
+      }
+    });
+  }
 }
 </script>
 </body>
