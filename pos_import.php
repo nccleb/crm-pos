@@ -129,6 +129,7 @@ td { padding:8px 10px; border-bottom:1px solid #f3f4f6; color:#4b5563; white-spa
                         <span class="col-chip">unit</span>
                         <span class="col-chip">barcode</span>
                         <span class="col-chip">description</span>
+                        <span class="col-chip">expiry_date <small>(YYYY-MM-DD)</small></span>
                     </div>
                     <p style="font-size:12px;color:#9ca3af;margin-top:8px;">* Required. Other columns are optional. You can also use: <em>name, product_name, selling_price, cost, stock, quantity</em></p>
                 </div>
@@ -212,6 +213,7 @@ var dbFields = [
     { key:'unit',        label:'Unit',            required:false },
     { key:'barcode',     label:'Barcode',         required:false },
     { key:'description', label:'Description',     required:false },
+    { key:'expiry_date', label:'Expiry Date',     required:false },
 ];
 
 var autoMap = {
@@ -223,6 +225,7 @@ var autoMap = {
     unit:['unit','uom'],
     barcode:['barcode','ean','sku','code'],
     description:['description','desc','details'],
+    expiry_date:['expiry_date','expiry','expiration','exp_date','expire_date','best_before'],
 };
 
 // ── File handling ─────────────────────────────────────────────────────────
@@ -335,47 +338,97 @@ function doImport() {
     document.getElementById('importProgress').style.display = '';
 
     // Build rows array
-    var rows = csvData.map(function(row) {
+    var allRows = csvData.map(function(row) {
         var r = {};
         dbFields.forEach(f => { if (mapping[f.key]) r[f.key] = String(getMapped(row,f.key)).trim(); });
         return r;
     }).filter(r => r.nomp);
 
-    var fd = new FormData();
-    fd.append('action','import_products');
-    fd.append('rows', JSON.stringify(rows));
+    var BATCH = 300; // rows per request
+    var totalRows = allRows.length;
+    var totalImported = 0;
+    var totalSkipped  = 0;
+    var allErrors     = [];
+    var batchNum      = 0;
+    var totalBatches  = Math.ceil(totalRows / BATCH);
 
-    fetch('ajax/pos_archive_ajax.php', {method:'POST',body:fd})
-        .then(r=>r.json())
-        .then(data => {
-            if (!data.success) {
-                alert('Import failed: ' + data.error);
-                btn.style.display='';
-                document.getElementById('importProgress').style.display='none';
-                return;
-            }
+    // Progress bar UI
+    var progressWrap = document.getElementById('importProgress');
+    progressWrap.innerHTML =
+        '<div style="margin-bottom:8px;font-size:13px;font-weight:600;color:#374151;" id="progressLabel">Preparing...</div>' +
+        '<div style="background:#e5e7eb;border-radius:8px;height:18px;overflow:hidden;">' +
+        '  <div id="progressBar" style="height:100%;background:linear-gradient(90deg,#1976D2,#10b981);width:0%;transition:width 0.3s;"></div>' +
+        '</div>' +
+        '<div style="font-size:12px;color:#6b7280;margin-top:6px;" id="progressSub"></div>';
+
+    function updateProgress(done, total) {
+        var pct = total > 0 ? Math.round(done / total * 100) : 0;
+        document.getElementById('progressBar').style.width = pct + '%';
+        document.getElementById('progressLabel').textContent =
+            'Importing... ' + done + ' of ' + total + ' rows (' + pct + '%)';
+        document.getElementById('progressSub').textContent =
+            'Batch ' + batchNum + ' of ' + totalBatches;
+    }
+
+    function sendBatch(offset) {
+        if (offset >= totalRows) {
+            // All batches done
             document.getElementById('doneStats').innerHTML =
-                '<strong style="color:#10b981;font-size:18px;">' + data.imported + ' products imported</strong>' +
-                (data.skipped>0 ? ' &nbsp;·&nbsp; ' + data.skipped + ' skipped (duplicates or errors)' : '');
+                '<strong style="color:#10b981;font-size:18px;">' + totalImported + ' products imported</strong>' +
+                (totalSkipped > 0 ? ' &nbsp;·&nbsp; ' + totalSkipped + ' skipped (duplicates or empty name)' : '');
 
-            if (data.errors && data.errors.length>0) {
+            if (allErrors.length > 0) {
                 document.getElementById('doneErrors').innerHTML =
                     '<div class="alert alert-warn"><i class="fas fa-exclamation-triangle"></i><div>' +
-                    '<strong>Skipped rows:</strong><br>' +
-                    data.errors.slice(0,10).map(e=>'• '+escHtml(e)).join('<br>') +
-                    (data.errors.length>10 ? '<br>...and '+(data.errors.length-10)+' more.' : '') +
+                    '<strong>Notes:</strong><br>' +
+                    allErrors.slice(0,10).map(e => '• ' + escHtml(e)).join('<br>') +
+                    (allErrors.length > 10 ? '<br>...and ' + (allErrors.length-10) + ' more.' : '') +
                     '</div></div>';
             }
             goStep(4);
-        });
+            return;
+        }
+
+        batchNum++;
+        var batch = allRows.slice(offset, offset + BATCH);
+        updateProgress(offset, totalRows);
+
+        var fd = new FormData();
+        fd.append('action', 'import_products');
+        fd.append('rows', JSON.stringify(batch));
+
+        fetch('ajax/pos_archive_ajax.php', {method:'POST', body:fd})
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    alert('Import failed on batch ' + batchNum + ': ' + data.error);
+                    btn.style.display = '';
+                    progressWrap.innerHTML = '';
+                    return;
+                }
+                totalImported += (data.imported || 0);
+                totalSkipped  += (data.skipped  || 0);
+                if (data.errors) allErrors = allErrors.concat(data.errors);
+                updateProgress(offset + batch.length, totalRows);
+                // Send next batch
+                sendBatch(offset + BATCH);
+            })
+            .catch(err => {
+                alert('Network error on batch ' + batchNum + ': ' + err.message);
+                btn.style.display = '';
+            });
+    }
+
+    sendBatch(0);
 }
 
 // ── Download template ────────────────────────────────────────────────────
 function downloadTemplate() {
-    var csv = 'nomp,category,price,cost_price,onhand,unit,barcode,description\n' +
-              '"TP-Link Router","Hardware",45.00,30.00,10,"piece","8934567890","Wireless router 300Mbps"\n' +
-              '"Ethernet Cable 5m","Accessories",8.50,4.00,50,"piece","","CAT6 flat cable"\n' +
-              '"Windows 11 License","Software",120.00,80.00,5,"service","MS-WIN11-OEM","Original license key"\n';
+    var csv = 'nomp,category,price,cost_price,onhand,unit,barcode,description,expiry_date\n' +
+              '"TP-Link Router","Hardware",45.00,30.00,10,"piece","8934567890","Wireless router 300Mbps",""\n' +
+              '"Ethernet Cable 5m","Accessories",8.50,4.00,50,"piece","","CAT6 flat cable",""\n' +
+              '"Labneh Baladeh","General",5.00,3.00,0,"kg","","Fresh Lebanese labneh","2026-06-30"\n' +
+              '"Windows 11 License","Software",120.00,80.00,5,"service","MS-WIN11-OEM","Original license key",""\n';
     var blob = new Blob([csv],{type:'text/csv'});
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

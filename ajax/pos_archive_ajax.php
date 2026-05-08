@@ -217,6 +217,7 @@ switch ($action) {
 
     // ── Import products from CSV/Excel data ────────────────────────────────
     case 'import_products':
+        set_time_limit(120); // 2 minutes max per batch
         $rows = json_decode($_POST['rows'] ?? '[]', true);
         if (empty($rows)) { echo json_encode(['success'=>false,'error'=>'No data provided']); break; }
 
@@ -224,29 +225,54 @@ switch ($action) {
         $skipped  = 0;
         $errors   = [];
 
+        // Build all value tuples, then INSERT IGNORE in one transaction
+        // This is ~50x faster than one INSERT per row with duplicate check
+        $values = [];
         foreach ($rows as $i => $row) {
-            $nomp = mysqli_real_escape_string($conn, trim($row['nomp'] ?? $row['name'] ?? $row['product_name'] ?? ''));
+            $nomp = trim($row['nomp'] ?? $row['name'] ?? $row['product_name'] ?? '');
             if (empty($nomp)) { $skipped++; continue; }
 
+            $nomp      = mysqli_real_escape_string($conn, $nomp);
             $category  = mysqli_real_escape_string($conn, trim($row['category'] ?? 'General'));
             $price     = (float)($row['price'] ?? $row['selling_price'] ?? 0);
             $cost      = (float)($row['cost_price'] ?? $row['cost'] ?? 0);
-            $onhand    = (int)($row['onhand'] ?? $row['stock'] ?? $row['quantity'] ?? 0);
+            $onhand    = (float)($row['onhand'] ?? $row['stock'] ?? $row['quantity'] ?? 0);
             $unit      = mysqli_real_escape_string($conn, trim($row['unit'] ?? 'piece'));
             $barcode   = mysqli_real_escape_string($conn, trim($row['barcode'] ?? ''));
             $desc      = mysqli_real_escape_string($conn, trim($row['description'] ?? $row['desc'] ?? ''));
+            $is_w      = ($unit === 'kg') ? 1 : 0;
+            $expiry_raw = trim($row['expiry_date'] ?? '');
+            $expiry_sql = (!empty($expiry_raw) && strtotime($expiry_raw))
+                          ? "'" . mysqli_real_escape_string($conn, date('Y-m-d', strtotime($expiry_raw))) . "'"
+                          : 'NULL';
 
-            // Check duplicate name
-            $dup = mysqli_fetch_assoc(mysqli_query($conn,
-                "SELECT codep FROM produit WHERE nomp = '$nomp' LIMIT 1"));
-            if ($dup) { $skipped++; $errors[] = "Row " . ($i+1) . ": '$nomp' already exists — skipped"; continue; }
+            $values[] = "('$nomp','$category',$price,$cost,$onhand,'$unit','$barcode','$desc','$unit',1,0,$is_w,$expiry_sql)";
+        }
 
-            $r = mysqli_query($conn,
-                "INSERT INTO produit (nomp, category, price, cost_price, onhand, unit, barcode, description, ond, active, is_deleted)
-                 VALUES ('$nomp','$category',$price,$cost,$onhand,'$unit','$barcode','$desc','$unit',1,0)");
+        if (empty($values)) {
+            echo json_encode(['success'=>true,'imported'=>0,'skipped'=>$skipped,'errors'=>[]]);
+            break;
+        }
 
-            if ($r) { $imported++; }
-            else { $errors[] = "Row " . ($i+1) . ": " . mysqli_error($conn); $skipped++; }
+        mysqli_begin_transaction($conn);
+
+        // Count rows before insert so we can calculate how many were actually new
+        $before = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as cnt FROM produit"))['cnt'];
+
+        $sql = "INSERT IGNORE INTO produit
+                    (nomp, category, price, cost_price, onhand, unit, barcode, description, ond, active, is_deleted, is_weighted, expiry_date)
+                VALUES " . implode(',', $values);
+
+        if (mysqli_query($conn, $sql)) {
+            mysqli_commit($conn);
+            $after    = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as cnt FROM produit"))['cnt'];
+            $imported = $after - $before;
+            $skipped  = count($values) - $imported;
+            if ($skipped > 0) $errors[] = "$skipped rows skipped (duplicate names)";
+        } else {
+            mysqli_rollback($conn);
+            echo json_encode(['success'=>false,'error'=>mysqli_error($conn)]);
+            break;
         }
 
         echo json_encode([

@@ -58,11 +58,15 @@ switch ($action) {
         $has_weight = $col_check && mysqli_num_rows($col_check) > 0;
         $weight_col = $has_weight ? ', is_weighted' : ', 0 AS is_weighted';
 
-        if ($raw === '') {
+        if ($raw === '' && $cat === '') {
+            // No query and no category — return empty, POS will show search prompt
+            echo json_encode(['success' => true, 'data' => [], 'prompt' => true]);
+            break;
+        } elseif ($raw === '') {
             $res = mysqli_query($conn,
                 "SELECT codep, nomp, price, onhand, unit, category, image, barcode $weight_col
                  FROM produit WHERE active = 1 $cat_sql
-                 ORDER BY nomp LIMIT 500"
+                 ORDER BY nomp LIMIT 1500"
             );
         } else {
             $q = '%' . mysqli_real_escape_string($conn, $raw) . '%';
@@ -71,7 +75,7 @@ switch ($action) {
                  FROM produit
                  WHERE active = 1 $cat_sql
                  AND (nomp LIKE '$q' OR barcode LIKE '$q')
-                 ORDER BY nomp LIMIT 500"
+                 ORDER BY nomp LIMIT 100"
             );
         }
         $products = [];

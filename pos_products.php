@@ -132,7 +132,16 @@ $where = $show_inactive ? '' : "WHERE p.active = 1";
 if ($search) $where .= ($where ? ' AND' : 'WHERE') . " (p.nomp LIKE '%$search%' OR p.barcode LIKE '%$search%')";
 if ($filter_cat) $where .= ($where ? ' AND' : 'WHERE') . " p.category = '$filter_cat'";
 
-$products = mysqli_query($conn, "SELECT * FROM produit p $where ORDER BY p.nomp");
+$products = mysqli_query($conn,
+    "SELECT p.*,
+            MIN(sri.expiry_date) AS earliest_expiry
+     FROM produit p
+     LEFT JOIN stock_receiving_items sri
+            ON sri.product_id = p.codep
+           AND sri.expiry_date IS NOT NULL
+     $where
+     GROUP BY p.codep
+     ORDER BY p.nomp");
 $cats = mysqli_query($conn, "SELECT * FROM pos_categories ORDER BY name");
 $categories = [];
 while ($c = mysqli_fetch_assoc($cats)) $categories[] = $c;
@@ -367,7 +376,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
                 <tr>
                     <th>#</th><th>Image</th><th>Name</th><th>Category</th>
                     <th>Price</th><th>Cost</th><th>Stock</th>
-                    <th>Unit</th><th>Status</th><th>Actions</th>
+                    <th>Unit</th><th>Expiry</th><th>Status</th><th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -402,6 +411,25 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
                     <?php endif; ?>
                 </td>
                 <td><?= htmlspecialchars($p['unit'] ?? '—') ?></td>
+                <td>
+                    <?php if (!empty($p['earliest_expiry'])): ?>
+                        <?php
+                            $today = new DateTime();
+                            $exp   = new DateTime($p['earliest_expiry']);
+                            $days  = (int)$today->diff($exp)->format('%r%a');
+                            if      ($days < 0)  { $color = '#ef4444'; $label = abs($days).'d ago'; }
+                            elseif  ($days <= 7)  { $color = '#f59e0b'; $label = $days.'d left'; }
+                            elseif  ($days <= 30) { $color = '#eab308'; $label = $days.'d left'; }
+                            else                  { $color = '#10b981'; $label = $days.'d left'; }
+                        ?>
+                        <span style="color:<?= $color ?>;font-weight:700;font-size:12px;display:block;">
+                            <?= date('d M Y', strtotime($p['earliest_expiry'])) ?>
+                        </span>
+                        <span style="color:<?= $color ?>;font-size:11px;"><?= $label ?></span>
+                    <?php else: ?>
+                        <span style="color:#d1d5db;">—</span>
+                    <?php endif; ?>
+                </td>
                 <td><span class="badge badge-<?= $p['active'] ? 'active' : 'inactive' ?>"><?= $p['active'] ? 'Active' : 'Inactive' ?></span></td>
                 <td>
                     <div class="action-btns">

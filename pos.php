@@ -80,30 +80,19 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
 }
 .search-bar input:focus { outline:none; border-color:#1976D2; }
 
-/* Category filters */
-.cat-filters { display:flex; gap:8px; flex-wrap:wrap; }
-.cat-btn {
-    padding:6px 14px; border-radius:20px; border:2px solid #e5e7eb;
-    background:white; font-size:13px; font-weight:600; cursor:pointer;
-    color:#6b7280; transition:all .2s;
-}
-.cat-btn.active, .cat-btn:hover {
-    background:#1976D2; border-color:#1976D2; color:white;
-}
-
 /* Product grid */
 .products-header { display:flex; align-items:center; justify-content:space-between; font-size:12px; color:#9ca3af; font-weight:600; padding:0 2px; }
-.products-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; overflow-y:auto; padding-bottom:10px; }
-.product-card { background:white; border-radius:12px; overflow:hidden; cursor:pointer; border:2px solid #f0f2f5; transition:all .2s; box-shadow:0 1px 4px rgba(0,0,0,.06); display:flex; flex-direction:column; }
+.products-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; overflow-y:auto; flex:1; min-height:0; padding-bottom:10px; }
+.product-card { background:white; border-radius:12px; overflow:hidden; cursor:pointer; border:2px solid #f0f2f5; transition:all .2s; box-shadow:0 1px 4px rgba(0,0,0,.06); display:flex; flex-direction:column; min-height:145px; }
 .product-card:hover { border-color:#1976D2; transform:translateY(-2px); box-shadow:0 6px 16px rgba(25,118,210,.15); }
 .product-card.out-of-stock { opacity:.45; cursor:not-allowed; filter:grayscale(.4); }
 .product-card.out-of-stock:hover { transform:none; box-shadow:0 1px 4px rgba(0,0,0,.06); border-color:#f0f2f5; }
 .product-card .card-top { padding:14px 14px 8px; display:flex; flex-direction:column; align-items:center; flex:1; }
-.product-card .icon { width:54px; height:54px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:22px; margin-bottom:10px; background:#eff6ff; color:#1976D2; overflow:hidden; flex-shrink:0; }
-.product-card .icon img { width:54px; height:54px; object-fit:cover; border-radius:10px; }
-.product-card .name { font-size:12px; font-weight:700; color:#1a1a2e; line-height:1.35; text-align:center; width:100%; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-.product-card .card-bottom { padding:8px 14px 12px; display:flex; align-items:center; justify-content:space-between; border-top:1px solid #f3f4f6; margin-top:8px; }
-.product-card .price { font-size:14px; font-weight:800; color:#1976D2; }
+.product-card .icon { width:48px; height:48px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:20px; margin-bottom:8px; background:#eff6ff; color:#1976D2; overflow:hidden; flex-shrink:0; }
+.product-card .icon img { width:48px; height:48px; object-fit:cover; border-radius:10px; }
+.product-card .name { font-size:13px; font-weight:700; color:#1a1a2e; line-height:1.35; text-align:center; width:100%; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.product-card .card-bottom { padding:8px 10px 10px; display:flex; align-items:center; justify-content:space-between; border-top:1px solid #f3f4f6; gap:4px; }
+.product-card .price { font-size:13px; font-weight:800; color:#1976D2; white-space:nowrap; }
 .stock-pill { font-size:10px; font-weight:700; padding:2px 7px; border-radius:20px; white-space:nowrap; }
 .stock-ok  { background:#d1fae5; color:#065f46; }
 .stock-low { background:#fef3c7; color:#92400e; }
@@ -306,18 +295,7 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
             <input type="text" id="productSearch" placeholder="🔍  Search products by name or barcode..." autocomplete="off">
         </div>
 
-        <!-- Category filters -->
-        <div class="cat-filters">
-            <button class="cat-btn active" data-cat="all">All</button>
-            <?php foreach ($categories as $cat): ?>
-            <button class="cat-btn" data-cat="<?= htmlspecialchars($cat['name']) ?>">
-                <?= htmlspecialchars($cat['name']) ?>
-            </button>
-            <?php endforeach; ?>
-        </div>
-
         <!-- Products grid -->
-        <div class="products-header"><span id="productsCount"></span></div>
         <div class="products-grid" id="productsGrid"></div>
 
     </div>
@@ -569,33 +547,36 @@ var paymentMethod = 'cash';
 var currency      = 'LBP';
 var searchTimeout = null;
 var customerTimeout = null;
-var currentCategory = 'all';
+
 
 var catColors = { 'General':'#6b7280','Hardware':'#2563eb','Software':'#7c3aed','Services':'#059669','Accessories':'#d97706','default':'#1976D2' };
 var catIcons  = { 'General':'fa-box','Hardware':'fa-microchip','Software':'fa-laptop-code','Services':'fa-concierge-bell','Accessories':'fa-plug','default':'fa-box' };
 
 // ── Load products ─────────────────────────────────────────────────────────
-function loadProducts(query, category, autoAdd, showAll) {
+function loadProducts(query, autoAdd) {
     var grid = document.getElementById('productsGrid');
 
-    // Show "start typing" only if no query, no category, and not explicitly loading all
-    if (!query && category === 'all' && !showAll) {
-        grid.innerHTML = '<div class="no-products"><i class="fas fa-box-open"></i><p>Start typing to search products</p></div>';
-        document.getElementById('productsCount').textContent = '';
+    if (!query) {
+        grid.innerHTML =
+            '<div class="no-products">' +
+            '<i class="fas fa-search" style="font-size:52px;color:#d1d5db;margin-bottom:14px;display:block;"></i>' +
+            '<p style="font-size:16px;font-weight:700;color:#6b7280;margin-bottom:6px;">Search or scan to find products</p>' +
+            '<p style="font-size:13px;color:#9ca3af;">Type a product name above or scan a barcode</p>' +
+            '</div>';
         return;
     }
 
     grid.innerHTML = '<div class="no-products"><i class="fas fa-spinner fa-spin"></i><p>Loading...</p></div>';
-    fetch('ajax/pos_ajax.php?action=search_products&q=' + encodeURIComponent(query || '') + '&cat=' + encodeURIComponent((category && category !== 'all') ? category : ''))
+    fetch('ajax/pos_ajax.php?action=search_products&q=' + encodeURIComponent(query || ''))
         .then(r => r.json())
         .then(data => {
             if (!data.success || data.data.length === 0) {
-                document.getElementById('productsCount').textContent = '0 products';
+                
                 grid.innerHTML = '<div class="no-products"><i class="fas fa-box-open"></i><p>No products found</p></div>';
                 return;
             }
             var filtered = data.data; // Already filtered by DB
-            document.getElementById('productsCount').textContent = filtered.length + ' product' + (filtered.length !== 1 ? 's' : '');
+            
 
             // Barcode scanner: if Enter was pressed and exactly 1 result
             if (autoAdd && filtered.length === 1) {
@@ -609,7 +590,7 @@ function loadProducts(query, category, autoAdd, showAll) {
                 searchInput.value = '';
                 searchInput.style.borderColor = '#10b981';
                 setTimeout(function() { searchInput.style.borderColor = ''; }, 600);
-                loadProducts('', currentCategory, false, true);
+                loadProducts('', false);
                 searchInput.focus();
                 return;
             }
@@ -668,7 +649,7 @@ searchInput.focus();
 
 // Re-focus search when clicking on products panel (but NOT if clicking customer search area)
 document.querySelector('.left-panel').addEventListener('click', function(e) {
-    if (!e.target.closest('button') && !e.target.closest('.cat-btn')) {
+    if (!e.target.closest('button')) {
         searchInput.focus();
     }
 });
@@ -685,24 +666,13 @@ searchInput.addEventListener('keydown', function(e) {
         clearTimeout(searchTimeout);
         var q = this.value.trim();
         if (!q) return;
-        loadProducts(q, currentCategory, true);
+        loadProducts(q, true);
     }
 });
 
 searchInput.addEventListener('input', function() {
     clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(() => loadProducts(this.value.trim(), currentCategory, false), 300);
-});
-
-document.querySelectorAll('.cat-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-        document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
-        this.classList.add('active');
-        currentCategory = this.dataset.cat;
-        // Use current search value, or load all for the selected category
-        var q = document.getElementById('productSearch').value.trim();
-        loadProducts(q, currentCategory, false, true);
-    });
+    searchTimeout = setTimeout(() => loadProducts(this.value.trim(), false), 300);
 });
 
 // ── Cart ──────────────────────────────────────────────────────────────────
@@ -1294,7 +1264,7 @@ function newSale() {
 
     clearCustomer();
     renderCart();
-    loadProducts('', currentCategory, false, true);
+    loadProducts('', false);
     searchInput.focus();
 }
 
@@ -1320,14 +1290,9 @@ function openDrawer() {
 function escHtml(str) { return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function escJs(str) { return String(str).replace(/'/g,"\\'").replace(/"/g,'\\"'); }
 
-// Load all products immediately + again on load for reliability
-fetch('ajax/pos_ajax.php?action=search_products&q=')
-    .then(r => r.json())
-    .then(data => { console.log('Direct test:', data.success, data.data ? data.data.length : 0); })
-    .catch(e => { console.error('Fetch failed:', e); });
-loadProducts('', 'all', false, true);
+// On load: show search prompt (Option C — large catalog mode)
 window.addEventListener('load', function() {
-    loadProducts('', 'all', false, true);
+    loadProducts('', false);
     loadPromotions();
     searchInput.focus();
 });
