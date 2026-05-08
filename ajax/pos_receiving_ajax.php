@@ -299,4 +299,14 @@ if ($action === "deactivate_product") {
     exit;
 }
 
+if ($action === "pull_batch") {
+    // Clears expiry_date on a single batch row so it no longer appears in expiry tracking.
+    // Product stays active — used when other valid batches still exist.
+    $batch_id = (int)($_POST["batch_id"] ?? 0);
+    if (!$batch_id) { echo json_encode(["error" => "No batch ID"]); exit; }
+    $db->query("UPDATE stock_receiving_items SET expiry_date = NULL WHERE id = $batch_id");
+    echo json_encode(["success" => true]);
+    exit;
+}
+
 echo json_encode(["error" => "Unknown action: $action"]);

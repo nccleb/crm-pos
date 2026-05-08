@@ -390,12 +390,11 @@ function goDiscount(productId) {
 }
 
 function pullProduct(productId, name, batchId, source) {
-  // Count non-expired batches for the same product still in the table
-  const allRows       = document.querySelectorAll('[data-product-id="' + productId + '"]');
-  const nonExpired    = Array.from(allRows).filter(r => r.dataset.status !== 'expired');
+  const allRows    = document.querySelectorAll('[data-product-id="' + productId + '"]');
+  const nonExpired = Array.from(allRows).filter(r => r.dataset.status !== 'expired');
 
   if (nonExpired.length > 0) {
-    // Other valid batches exist — only remove this expired batch row, keep product active
+    // Other valid batches exist — only pull this expired batch, keep product active
     if (!confirm(
       'Pull expired batch of "' + name + '" from shelf?\n\n' +
       'This product has ' + nonExpired.length + ' other valid batch(es) — ' +
@@ -403,16 +402,27 @@ function pullProduct(productId, name, batchId, source) {
       'Only this expired batch will be removed from tracking.'
     )) return;
 
-    // Remove only the expired rows for this product (there may be >1 expired batch)
-    Array.from(allRows)
-      .filter(r => r.dataset.status === 'expired')
-      .forEach(r => r.remove());
-
-    applyFilters();
-    alert('Expired batch removed from tracking. Product remains active at POS.');
+    fetch('ajax/pos_receiving_ajax.php', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'action=pull_batch&batch_id=' + batchId
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) {
+        // Remove only the expired rows for this product from the table
+        Array.from(allRows)
+          .filter(r => r.dataset.status === 'expired')
+          .forEach(r => r.remove());
+        applyFilters();
+        alert('Expired batch removed. Product remains active at POS.');
+      } else {
+        alert('Error: ' + (data.error || 'Could not pull batch'));
+      }
+    });
 
   } else {
-    // All batches for this product are expired — safe to deactivate the whole product
+    // All batches expired — deactivate the whole product
     if (!confirm(
       'Pull "' + name + '" from shelf?\n\n' +
       'All batches of this product are expired.\n' +
@@ -421,7 +431,7 @@ function pullProduct(productId, name, batchId, source) {
 
     fetch('ajax/pos_receiving_ajax.php', {
       method: 'POST',
-      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: 'action=deactivate_product&product_id=' + productId
     })
     .then(r => r.json())
