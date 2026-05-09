@@ -22,6 +22,7 @@ if (!$conn) {
 mysqli_set_charset($conn, 'utf8mb4');
 
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
+require_once __DIR__ . '/pos_log.php';
 
 switch ($action) {
 
@@ -58,15 +59,11 @@ switch ($action) {
         $has_weight = $col_check && mysqli_num_rows($col_check) > 0;
         $weight_col = $has_weight ? ', is_weighted' : ', 0 AS is_weighted';
 
-        if ($raw === '' && $cat === '') {
-            // No query and no category — return empty, POS will show search prompt
-            echo json_encode(['success' => true, 'data' => [], 'prompt' => true]);
-            break;
-        } elseif ($raw === '') {
+        if ($raw === '') {
             $res = mysqli_query($conn,
                 "SELECT codep, nomp, price, onhand, unit, category, image, barcode $weight_col
                  FROM produit WHERE active = 1 $cat_sql
-                 ORDER BY nomp LIMIT 1500"
+                 ORDER BY nomp LIMIT 500"
             );
         } else {
             $q = '%' . mysqli_real_escape_string($conn, $raw) . '%';
@@ -75,7 +72,7 @@ switch ($action) {
                  FROM produit
                  WHERE active = 1 $cat_sql
                  AND (nomp LIKE '$q' OR barcode LIKE '$q')
-                 ORDER BY nomp LIMIT 100"
+                 ORDER BY nomp LIMIT 500"
             );
         }
         $products = [];
@@ -194,6 +191,9 @@ switch ($action) {
         }
 
         $usd_equiv = $usd_to_lbp > 0 ? round($final_total / $usd_to_lbp, 2) : 0;
+        posLog($conn, $agent_id, $agent_name, 'sale_completed',
+            "Sale #$sale_id — LL " . number_format($final_total) . " — $payment_method" . ($client_name !== 'Walk-in Customer' ? " — $client_name" : ''),
+            $sale_id, 'sale');
         echo json_encode([
             'success'       => true,
             'sale_id'       => $sale_id,
@@ -238,7 +238,9 @@ switch ($action) {
             "INSERT INTO stock_movements (product_id, product_name, type, qty_change, qty_before, qty_after, note, agent_id, agent_name)
              VALUES ($product_id, '$product_name', '$type', $qty_change, $qty_before, $qty_after, '$note', $agent_id, '$agent_name')"
         );
-
+        posLog($conn, $agent_id, $agent_name, 'stock_adjusted',
+            "$type — $product_name — qty change: $qty_change (before: $qty_before, after: $qty_after)" . ($note ? " — $note" : ''),
+            $product_id, 'product');
         echo json_encode(['success'=>true, 'qty_before'=>$qty_before, 'qty_after'=>$qty_after]);
         break;
 

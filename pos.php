@@ -278,6 +278,7 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
     <?php if ($agent_name === 'super'): ?>
     <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
+    <a href="pos_activity.php"><i class="fas fa-history"></i> Activity</a>
     
     <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
     <?php endif; ?>

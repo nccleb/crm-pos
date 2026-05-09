@@ -28,6 +28,7 @@ $rate_row = $db->query("SELECT usd_to_lbp FROM company_settings LIMIT 1")->fetch
 $usd_to_lbp = $rate_row ? (float)$rate_row["usd_to_lbp"] : 89700;
 
 $action = $_GET["action"] ?? $_POST["action"] ?? "";
+require_once __DIR__ . '/pos_log.php';
 
 // ============================================================
 // SUPPLIERS
@@ -54,11 +55,14 @@ if ($action === "save_supplier") {
     if ($id > 0) {
         $db->query("UPDATE pos_suppliers SET name='$name', contact_person='$contact',
             phone='$phone', address='$address', notes='$notes' WHERE id=$id");
+        posLog($db, $agent_id, $agent_name, 'supplier_updated', "Supplier updated: $name", $id, 'supplier');
         echo json_encode(["success" => true, "message" => "Supplier updated"]);
     } else {
         $db->query("INSERT INTO pos_suppliers (name, contact_person, phone, address, notes)
             VALUES ('$name','$contact','$phone','$address','$notes')");
-        echo json_encode(["success" => true, "id" => $db->insert_id, "message" => "Supplier added"]);
+        $new_id = $db->insert_id;
+        posLog($db, $agent_id, $agent_name, 'supplier_added', "Supplier added: $name", $new_id, 'supplier');
+        echo json_encode(["success" => true, "id" => $new_id, "message" => "Supplier added"]);
     }
     exit;
 }
@@ -211,6 +215,9 @@ if ($action === "save_receiving") {
         }
 
         $db->commit();
+        posLog($db, $agent_id, $agent_name, 'receiving_saved',
+            "Receiving #$receiving_id — $supplier_name — " . count($items) . " item(s) — LL " . number_format(round($total_lbp)),
+            $receiving_id, 'receiving');
         echo json_encode([
             "success"      => true,
             "receiving_id" => $receiving_id,
@@ -294,17 +301,22 @@ if ($action === "get_batches") {
 if ($action === "deactivate_product") {
     $product_id = (int)($_POST["product_id"] ?? 0);
     if (!$product_id) { echo json_encode(["error" => "No product ID"]); exit; }
+    $prow = $db->query("SELECT nomp FROM produit WHERE codep=$product_id")->fetch_assoc();
+    $pname = $prow['nomp'] ?? "Product #$product_id";
     $db->query("UPDATE produit SET active = 0 WHERE codep = $product_id");
+    posLog($db, $agent_id, $agent_name, 'product_pulled', "Product deactivated (all batches expired): $pname", $product_id, 'product');
     echo json_encode(["success" => true]);
     exit;
 }
 
 if ($action === "pull_batch") {
-    // Clears expiry_date on a single batch row so it no longer appears in expiry tracking.
-    // Product stays active — used when other valid batches still exist.
     $batch_id = (int)($_POST["batch_id"] ?? 0);
     if (!$batch_id) { echo json_encode(["error" => "No batch ID"]); exit; }
+    $batch = $db->query("SELECT product_id, product_name, expiry_date FROM stock_receiving_items WHERE id=$batch_id")->fetch_assoc();
     $db->query("UPDATE stock_receiving_items SET expiry_date = NULL WHERE id = $batch_id");
+    posLog($db, $agent_id, $agent_name, 'batch_pulled',
+        "Expired batch pulled: " . ($batch['product_name'] ?? "Batch #$batch_id") . " (expiry: " . ($batch['expiry_date'] ?? '?') . ")",
+        $batch['product_id'] ?? null, 'product');
     echo json_encode(["success" => true]);
     exit;
 }

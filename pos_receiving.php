@@ -427,7 +427,7 @@ function renderItems() {
   tbody.innerHTML = items.map((item, idx) => {
     const sub_lbp_total = Math.round(item.qty * item.cost_price_lbp);
   
-    const costChanged = item.current_cost && Math.abs(item.cost_price_lbp - item.current_cost) > 100;
+    const costChanged = item.last_cost_lbp && Math.abs(item.cost_price_lbp - item.last_cost_lbp) > 100;
     const lastInfo = item.last_cost
       ? `Last: LL ${Math.round(item.last_cost_lbp || 0).toLocaleString()} on ${item.last_cost ? item.last_cost.received_date : ''}`
       : `Current: LL ${Math.round(item.current_cost).toLocaleString()}`;

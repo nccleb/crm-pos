@@ -10,6 +10,7 @@ if (!$is_super) { header("Location: pos.php"); exit(); }
 
 $conn = mysqli_connect("172.18.208.1","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
+require_once __DIR__ . '/ajax/pos_log.php';
 
 $msg = '';
 $msg_type = '';
@@ -61,6 +62,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $msg = 'Settings saved successfully.';
         $msg_type = 'success';
+        posLog($conn, (int)($_SESSION['ooq'] ?? 0), $_SESSION['oop'], 'settings_saved',
+            "Company settings updated — VAT: $vat_rate% — Rate: $usd_to_lbp — Printer: $printer_name");
     }
 }
 
@@ -376,131 +379,6 @@ error_reporting(E_ALL); endif; ?>
     </div>
 
 </div>
-
-<!-- ── Backup & Restore ──────────────────────────────────────────────────── -->
-<div style="max-width:900px;margin:24px auto 40px;padding:0 20px;">
-    <div style="background:white;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.08);overflow:hidden;">
-        <div style="padding:20px 28px;border-bottom:1px solid #f0f2f5;display:flex;align-items:center;gap:10px;">
-            <i class="fas fa-database" style="color:#1976D2;font-size:18px;"></i>
-            <div>
-                <div style="font-size:16px;font-weight:800;color:#1a1a2e;">Database Backup & Restore</div>
-                <div style="font-size:12px;color:#9ca3af;margin-top:2px;">Download a full backup of your database or restore from a previous backup</div>
-            </div>
-        </div>
-        <div style="padding:28px;display:grid;grid-template-columns:1fr 1fr;gap:24px;">
-
-            <!-- Backup -->
-            <div style="background:#f0fdf4;border:2px solid #bbf7d0;border-radius:12px;padding:22px;">
-                <div style="font-size:14px;font-weight:800;color:#15803d;margin-bottom:8px;">
-                    <i class="fas fa-download"></i> Download Backup
-                </div>
-                <div style="font-size:12px;color:#6b7280;margin-bottom:16px;line-height:1.6;">
-                    Downloads a complete <code>.sql</code> file of your entire database including all products, sales, stock movements, and settings.<br><br>
-                    <strong>Recommended:</strong> Run a backup weekly or before any major changes.
-                </div>
-                <button onclick="doBackup()" id="backupBtn"
-                    style="background:#16a34a;color:white;border:none;padding:10px 20px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;">
-                    <i class="fas fa-download"></i> Download Backup Now
-                </button>
-                <div id="backupMsg" style="font-size:12px;margin-top:10px;text-align:center;min-height:18px;"></div>
-            </div>
-
-            <!-- Restore -->
-            <div style="background:#fef2f2;border:2px solid #fecaca;border-radius:12px;padding:22px;">
-                <div style="font-size:14px;font-weight:800;color:#dc2626;margin-bottom:8px;">
-                    <i class="fas fa-upload"></i> Restore from Backup
-                </div>
-                <div style="font-size:12px;color:#6b7280;margin-bottom:16px;line-height:1.6;">
-                    Upload a previously downloaded <code>.sql</code> backup file to restore your database.<br><br>
-                    <strong style="color:#dc2626;">⚠ Warning:</strong> This will overwrite all current data. Make sure to download a fresh backup first.
-                </div>
-                <input type="file" id="restoreFile" accept=".sql"
-                    style="display:none;" onchange="doRestore(this)">
-                <button onclick="document.getElementById('restoreFile').click()"
-                    style="background:#dc2626;color:white;border:none;padding:10px 20px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;">
-                    <i class="fas fa-upload"></i> Choose Backup File to Restore
-                </button>
-                <div id="restoreMsg" style="font-size:12px;margin-top:10px;text-align:center;min-height:18px;"></div>
-            </div>
-
-        </div>
-    </div>
-</div>
-
-<script>
-function doBackup() {
-    var btn = document.getElementById('backupBtn');
-    var msg = document.getElementById('backupMsg');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating backup...';
-    msg.textContent = '';
-
-    fetch('ajax/pos_backup_ajax.php?action=backup')
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                // Decode base64 and trigger download
-                var bytes = Uint8Array.from(atob(data.content), c => c.charCodeAt(0));
-                var blob  = new Blob([bytes], {type: 'application/octet-stream'});
-                var a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = data.filename;
-                a.click();
-                msg.textContent = '✅ Backup downloaded: ' + data.filename;
-                msg.style.color = '#16a34a';
-            } else {
-                msg.textContent = '❌ ' + data.error;
-                msg.style.color = '#dc2626';
-            }
-        })
-        .catch(err => {
-            msg.textContent = '❌ Request failed: ' + err.message;
-            msg.style.color = '#dc2626';
-        })
-        .finally(() => {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-download"></i> Download Backup Now';
-        });
-}
-
-function doRestore(input) {
-    var file = input.files[0];
-    if (!file) return;
-    var msg = document.getElementById('restoreMsg');
-
-    if (!confirm(
-        '⚠ RESTORE DATABASE?\n\n' +
-        'File: ' + file.name + '\n\n' +
-        'This will OVERWRITE all current data with the backup.\n' +
-        'This cannot be undone.\n\n' +
-        'Are you sure you want to continue?'
-    )) { input.value = ''; return; }
-
-    msg.textContent = '⏳ Uploading and restoring...';
-    msg.style.color = '#6b7280';
-
-    var fd = new FormData();
-    fd.append('action', 'restore');
-    fd.append('sqlfile', file);
-
-    fetch('ajax/pos_backup_ajax.php', {method:'POST', body:fd})
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                msg.textContent = '✅ Restored successfully — ' + data.statements + ' statements executed.';
-                msg.style.color = '#16a34a';
-            } else {
-                msg.textContent = '❌ ' + data.error;
-                msg.style.color = '#dc2626';
-            }
-        })
-        .catch(err => {
-            msg.textContent = '❌ ' + err.message;
-            msg.style.color = '#dc2626';
-        })
-        .finally(() => { input.value = ''; });
-}
-</script>
 
 <script>
 function toggleDrawerUsb() {

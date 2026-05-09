@@ -13,6 +13,7 @@ $conn = mysqli_connect("172.18.208.1","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
+require_once __DIR__ . '/pos_log.php';
 
 // ── List all promotions ───────────────────────────────────
 if ($action === 'list') {
@@ -91,6 +92,7 @@ if ($action === 'save') {
              bundle_items=$bundle_items_sql, bundle_price=$bundle_price,
              date_from=$date_from, date_to=$date_to
              WHERE id=$id");
+        posLog($conn, $agent_id, $agent_name, 'promotion_updated', "Promotion updated: $name ($type)", $id, 'promotion');
     } else {
         mysqli_query($conn,
             "INSERT INTO pos_promotions
@@ -105,6 +107,7 @@ if ($action === 'save') {
               $bundle_items_sql,$bundle_price,
               $date_from,$date_to,1)");
         $id = mysqli_insert_id($conn);
+        posLog($conn, $agent_id, $agent_name, 'promotion_added', "Promotion added: $name ($type)", $id, 'promotion');
     }
     echo json_encode(['success' => true, 'id' => $id]);
     exit;
@@ -114,7 +117,10 @@ if ($action === 'save') {
 if ($action === 'toggle') {
     $id  = (int)($_POST['id'] ?? 0);
     $val = (int)($_POST['active'] ?? 0);
+    $prow = mysqli_fetch_assoc(mysqli_query($conn, "SELECT name FROM pos_promotions WHERE id=$id"));
     mysqli_query($conn, "UPDATE pos_promotions SET active=$val WHERE id=$id");
+    posLog($conn, $agent_id, $agent_name, 'promotion_toggled',
+        "Promotion " . ($val ? 'enabled' : 'disabled') . ": " . ($prow['name'] ?? "#$id"), $id, 'promotion');
     echo json_encode(['success' => true]);
     exit;
 }
@@ -122,7 +128,10 @@ if ($action === 'toggle') {
 // ── Delete ────────────────────────────────────────────────
 if ($action === 'delete') {
     $id = (int)($_POST['id'] ?? 0);
+    $prow = mysqli_fetch_assoc(mysqli_query($conn, "SELECT name FROM pos_promotions WHERE id=$id"));
     mysqli_query($conn, "DELETE FROM pos_promotions WHERE id=$id");
+    posLog($conn, $agent_id, $agent_name, 'promotion_deleted',
+        "Promotion deleted: " . ($prow['name'] ?? "#$id"), $id, 'promotion');
     echo json_encode(['success' => true]);
     exit;
 }
