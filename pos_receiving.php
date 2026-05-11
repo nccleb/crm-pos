@@ -11,7 +11,7 @@ $agent_name = $_SESSION["oop"];
 $is_super   = ($agent_name === "super");
 
 // Get exchange rate + company settings
-$db = new mysqli("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
+$db = new mysqli("192.168.1.7", "root", "1Sys9Admeen72", "nccleb_test");
 $db->set_charset("utf8mb4");
 $settings   = $db->query("SELECT usd_to_lbp FROM company_settings LIMIT 1")->fetch_assoc();
 $usd_to_lbp = $settings ? (float)$settings["usd_to_lbp"] : 89700;

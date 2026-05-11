@@ -1,5 +1,5 @@
 <?php
-$servername = "172.18.208.1";
+$servername = "192.168.1.7";
 $username = "root";
 $password = "1Sys9Admeen72";
 $dbname = "nccleb_test";

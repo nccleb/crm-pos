@@ -612,7 +612,7 @@ $n = isset($_GET['page2']) ? urldecode($_GET['page2']) : "";
       <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
         <h3 id="totalCount">
           <?php 
-          $idr_count = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
+          $idr_count = mysqli_connect("192.168.1.7", "root", "1Sys9Admeen72", "nccleb_test");
           if ($idr_count) {
             $result_count = mysqli_query($idr_count, "SELECT COUNT(*) as total FROM client");
             if ($result_count) {
@@ -670,7 +670,7 @@ $n = isset($_GET['page2']) ? urldecode($_GET['page2']) : "";
         </thead>
         <tbody>
           <?php 
-          $host = "172.18.208.1";
+          $host = "192.168.1.7";
           $user = "root";
           $pass = "1Sys9Admeen72";
           $db = "nccleb_test";

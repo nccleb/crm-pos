@@ -4,7 +4,7 @@ if (empty($_SESSION['oop'])) { header("Location: login200.php"); exit(); }
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 
-$conn = mysqli_connect("172.18.208.1","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("192.168.1.7","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
 
 // Filters
