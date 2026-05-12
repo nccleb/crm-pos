@@ -23,6 +23,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $vat_rate        = (float)($_POST['vat_rate'] ?? 0);
     $usd_to_lbp      = (float)($_POST['usd_to_lbp'] ?? 89500);
     $printer_name    = mysqli_real_escape_string($conn, trim($_POST['printer_name'] ?? ''));
+    $disc_regular    = max(0, min(100, (int)($_POST['disc_regular']  ?? 0)));
+    $disc_gold       = max(0, min(100, (int)($_POST['disc_gold']     ?? 5)));
+    $disc_platinum   = max(0, min(100, (int)($_POST['disc_platinum'] ?? 10)));
+    $disc_premium    = max(0, min(100, (int)($_POST['disc_premium']  ?? 15)));
     $print_mode      = in_array($_POST['print_mode'] ?? '', ['manual','automatic']) ? $_POST['print_mode'] : 'manual';
     $paper_width     = in_array($_POST['paper_width'] ?? '', ['58mm','80mm']) ? $_POST['paper_width'] : '80mm';
     $cash_drawer     = in_array($_POST['cash_drawer'] ?? '', ['disabled','manual','automatic']) ? $_POST['cash_drawer'] : 'disabled';
@@ -52,7 +56,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 drawer_type     = '$drawer_type',
                 drawer_usb_name = '$drawer_usb_name',
                 usd_denominations = '$usd_denoms',
-                lbp_denominations = '$lbp_denoms'
+                lbp_denominations = '$lbp_denoms',
+                disc_regular  = $disc_regular,
+                disc_gold     = $disc_gold,
+                disc_platinum = $disc_platinum,
+                disc_premium  = $disc_premium
                 WHERE id = {$exists['id']}");
         } else {
             mysqli_query($conn, "INSERT INTO company_settings
@@ -70,7 +78,8 @@ if (!$settings) {
     $settings = ['company_name'=>'','company_phone'=>'','company_address'=>'','receipt_footer'=>'Thank you for your business!',
                  'vat_rate'=>0,'usd_to_lbp'=>89500,'printer_name'=>'','print_mode'=>'manual','paper_width'=>'80mm',
                  'cash_drawer'=>'disabled','drawer_type'=>'dk','drawer_usb_name'=>'',
-                 'usd_denominations'=>'1,5,10,20,50,100','lbp_denominations'=>'5000,10000,20000,50000,100000'];
+                 'usd_denominations'=>'1,5,10,20,50,100','lbp_denominations'=>'5000,10000,20000,50000,100000',
+                 'disc_regular'=>0,'disc_gold'=>5,'disc_platinum'=>10,'disc_premium'=>15];
 }
 
 mysqli_close($conn);
@@ -191,7 +200,7 @@ error_reporting(E_ALL); endif; ?>
             </div>
         </div>
         <div class="card-body">
-            <form method="POST">
+            <form method="POST" id="settingsForm">
 
                 <div class="form-group">
                     <label><i class="fas fa-building"></i> Company Name <span style="color:#ef4444;">*</span></label>
@@ -375,6 +384,58 @@ error_reporting(E_ALL); endif; ?>
         </div>
     </div>
 
+</div>
+
+<!-- ── Grade Discounts ───────────────────────────────────────────────────── -->
+<div style="max-width:900px;margin:24px auto 0;padding:0 20px;">
+    <div style="background:white;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.08);overflow:hidden;">
+        <div style="padding:20px 28px;border-bottom:1px solid #f0f2f5;display:flex;align-items:center;gap:10px;">
+            <i class="fas fa-star" style="color:#f59e0b;font-size:18px;"></i>
+            <div>
+                <div style="font-size:16px;font-weight:800;color:#1a1a2e;">Loyalty Grade Discounts</div>
+                <div style="font-size:12px;color:#9ca3af;margin-top:2px;">Set automatic discount % per customer grade — applied at POS when customer is selected</div>
+            </div>
+        </div>
+        <div style="padding:24px 28px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;">
+                <?php
+                $grades = [
+                    ['regular',  'Regular',  '#6b7280', 'disc_regular'],
+                    ['gold',     'Gold',     '#f59e0b', 'disc_gold'],
+                    ['platinum', 'Platinum', '#1976D2', 'disc_platinum'],
+                    ['premium',  'Premium',  '#7c3aed', 'disc_premium'],
+                ];
+                foreach ($grades as [$key, $label, $color, $field]):
+                    $val = (int)($settings[$field] ?? 0);
+                ?>
+                <div style="background:<?= $color ?>0d;border:2px solid <?= $color ?>33;border-radius:12px;padding:16px;text-align:center;">
+                    <div style="font-size:12px;font-weight:800;color:<?= $color ?>;text-transform:uppercase;margin-bottom:10px;letter-spacing:.5px;">
+                        <i class="fas fa-star" style="font-size:10px;"></i> <?= $label ?>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+                        <input type="number" name="<?= $field ?>" value="<?= $val ?>"
+                            min="0" max="100" step="1" form="settingsForm"
+                            style="width:65px;padding:8px;border:2px solid <?= $color ?>44;border-radius:8px;
+                                   font-size:18px;font-weight:800;color:<?= $color ?>;text-align:center;
+                                   background:white;outline:none;"
+                            onwheel="this.blur()">
+                        <span style="font-size:20px;font-weight:800;color:<?= $color ?>;">%</span>
+                    </div>
+                    <?php if ($val === 0): ?>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:6px;">No discount</div>
+                    <?php else: ?>
+                    <div style="font-size:11px;color:<?= $color ?>;margin-top:6px;font-weight:600;"><?= $val ?>% off automatically</div>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <div style="margin-top:14px;font-size:12px;color:#9ca3af;display:flex;align-items:center;gap:6px;">
+                <i class="fas fa-info-circle"></i>
+                Set to 0 for no discount. Changes take effect immediately after saving.
+                The discount is applied to the cart subtotal before VAT.
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- ── Backup & Restore ──────────────────────────────────────────────────── -->

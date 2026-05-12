@@ -153,8 +153,24 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
 .selected-customer button {
     background:none; border:none; color:#ef4444; cursor:pointer; font-size:14px;
 }
-
-/* Cart items */
+.grade-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:20px;
+               font-size:11px; font-weight:700; }
+.grade-discount-bar { background:#eff6ff; border-radius:8px; padding:7px 12px; margin-top:6px;
+                      font-size:12px; color:#1976D2; font-weight:600; display:none;
+                      align-items:center; gap:6px; border:1px solid #bfdbfe; }
+.client-history-panel { border-top:1px solid #f3f4f6; background:#fafafa; }
+.client-history-toggle { padding:8px 18px; display:flex; align-items:center; justify-content:space-between;
+                         cursor:pointer; user-select:none; }
+.client-history-toggle span { font-size:11px; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:.5px; }
+.client-history-body { padding:0 10px 10px; display:none; max-height:230px; overflow-y:auto; }
+.ch-sale { background:white; border-radius:8px; border:1px solid #f0f2f5; padding:8px 10px;
+           margin-bottom:6px; }
+.ch-sale-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; }
+.ch-sale-id { font-size:11px; color:#9ca3af; font-weight:600; }
+.ch-sale-total { font-size:12px; font-weight:800; color:#1976D2; }
+.ch-sale-date { font-size:10px; color:#9ca3af; }
+.ch-sale-items { font-size:11px; color:#6b7280; line-height:1.5; }
+.ch-summary { font-size:11px; color:#6b7280; padding:4px 0 8px; }
 .cart-items { flex:1; overflow-y:auto; padding:8px 14px; min-height:0; }
 .cart-empty { text-align:center; padding:40px 20px; color:#9ca3af; }
 .cart-empty i { font-size:40px; margin-bottom:10px; display:block; }
@@ -319,7 +335,25 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
             <div class="selected-customer" id="selectedCustomer">
                 <i class="fas fa-user-check" style="color:#1976D2;"></i>
                 <span class="cname" id="selectedCustomerName"></span>
+                <span id="gradeTag"></span>
                 <button onclick="clearCustomer()" title="Remove"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="grade-discount-bar" id="gradeDiscountBar">
+                <i class="fas fa-tag"></i>
+                <span id="gradeDiscountText"></span>
+            </div>
+        </div>
+
+        <!-- Client purchase history panel -->
+        <div class="client-history-panel" id="clientHistoryPanel" style="display:none;">
+            <div class="client-history-toggle" onclick="toggleHistory()">
+                <span><i class="fas fa-history" style="margin-right:5px;"></i> Purchase History</span>
+                <span id="historyChevron" style="color:#9ca3af;font-size:11px;">▼</span>
+            </div>
+            <div class="client-history-body" id="clientHistoryBody">
+                <div style="text-align:center;padding:14px;color:#9ca3af;font-size:12px;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </div>
             </div>
         </div>
 
@@ -691,6 +725,7 @@ function addToCart(productId, productName, unitPrice, isWeighted, unit, category
     }
     applyPromotions();
     renderCart();
+    applyGradeDiscount();
 }
 
 function addWeightedToCart(productId, productName, unitPrice, weightKg, unit) {
@@ -700,6 +735,15 @@ function addWeightedToCart(productId, productName, unitPrice, weightKg, unit) {
                 is_weighted: true, unit: unit || 'kg' });
     applyPromotions();
     renderCart();
+    applyGradeDiscount();
+}
+
+function applyGradeDiscount() {
+    if (!gradeDiscountApplied) return;
+    var cartTotal = cart.reduce((s, i) => s + i.unit_price * i.qty, 0);
+    var discAmount = Math.round(cartTotal * gradeDiscountApplied / 100);
+    document.getElementById('discountInput').value = discAmount;
+    updateTotals();
 }
 
 function renderCart() {
@@ -863,8 +907,11 @@ document.getElementById('customerSearch').addEventListener('input', function() {
                     dd.innerHTML = '<div class="customer-item"><span class="cname">No clients found</span></div>';
                 } else {
                     dd.innerHTML = data.data.map(c =>
-                        '<div class="customer-item" onclick="selectCustomer(' + c.id + ',\'' + escJs(c.name) + '\')">' +
-                            '<div class="cname">' + escHtml(c.name) + (c.company ? ' — ' + escHtml(c.company) : '') + '</div>' +
+                        '<div class="customer-item" onclick="selectCustomer(' + c.id + ',\'' + escJs(c.name) + '\',\'' + escJs(c.grade || '') + '\',\'' + escJs(c.loyalty || '') + '\')">' +
+                            '<div class="cname">' + escHtml(c.name) + (c.company ? ' — ' + escHtml(c.company) : '') +
+                            (c.grade ? ' <span style="font-size:10px;font-weight:700;color:#7c3aed;background:#f3f0ff;padding:1px 6px;border-radius:10px;">' + escHtml(c.grade.charAt(0).toUpperCase()+c.grade.slice(1)) + '</span>' : '') +
+                            (c.loyalty === 'Yes' ? ' <span style="font-size:10px;font-weight:700;color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:10px;">&#9733; Card</span>' : '') +
+                            '</div>' +
                             '<div class="cnum">' + (c.number || '') + '</div>' +
                         '</div>'
                     ).join('');
@@ -874,14 +921,134 @@ document.getElementById('customerSearch').addEventListener('input', function() {
     }, 300);
 });
 
-function selectCustomer(id, name) {
-    selectedClientId = id; selectedClientName = name;
+// ── Grade → discount mapping — loaded from Settings ──────────────────────
+var GRADE_DISCOUNTS = {
+    'regular':  <?= (int)($pos_settings['disc_regular']  ?? 0) ?>,
+    'gold':     <?= (int)($pos_settings['disc_gold']     ?? 5) ?>,
+    'platinum': <?= (int)($pos_settings['disc_platinum'] ?? 10) ?>,
+    'premium':  <?= (int)($pos_settings['disc_premium']  ?? 15) ?>,
+};
+console.log('[NCC POS] Grade discounts loaded:', GRADE_DISCOUNTS);
+var GRADE_COLORS = {
+    'regular':  '#6b7280',
+    'gold':     '#f59e0b',
+    'platinum': '#1976D2',
+    'premium':  '#7c3aed',
+};
+var currentClientGrade    = '';
+var gradeDiscountApplied  = 0;
+var historyOpen           = false;
+
+function selectCustomer(id, name, grade, loyalty) {
+    selectedClientId   = id;
+    selectedClientName = name;
+    var gradeKey       = (grade || '').toLowerCase().trim();
+    currentClientGrade = gradeKey;
+    console.log('[NCC POS] Customer selected:', {id, name, grade, gradeKey, loyalty, discPct: GRADE_DISCOUNTS[gradeKey]});
+
     document.getElementById('customerSearch').value = '';
     document.getElementById('customerDropdown').classList.remove('show');
     document.getElementById('selectedCustomerName').textContent = name;
     document.getElementById('selectedCustomer').style.display = 'flex';
+
+    // Grade badge + loyalty card badge
+    var gradeTag = document.getElementById('gradeTag');
+    var discBar  = document.getElementById('gradeDiscountBar');
+    var discPct  = GRADE_DISCOUNTS[gradeKey] || 0;
+    gradeDiscountApplied = discPct;
+
+    var badges = '';
+    if (gradeKey) {
+        var col = GRADE_COLORS[gradeKey] || '#6b7280';
+        badges += '<span class="grade-badge" style="background:' + col + '22;color:' + col + ';">' +
+            '<i class="fas fa-star" style="font-size:9px;"></i> ' +
+            gradeKey.charAt(0).toUpperCase() + gradeKey.slice(1) + '</span>';
+    }
+    if (loyalty === 'Yes') {
+        badges += '<span class="grade-badge" style="background:#fef3c7;color:#d97706;margin-left:4px;">' +
+            '<i class="fas fa-credit-card" style="font-size:9px;"></i> Loyalty Card</span>';
+    }
+    gradeTag.innerHTML = badges;
+
+    if (discPct > 0) {
+        document.getElementById('gradeDiscountText').textContent =
+            gradeKey.charAt(0).toUpperCase() + gradeKey.slice(1) + ' customer — ' + discPct + '% loyalty discount applied automatically';
+        discBar.style.display = 'flex';
+        var cartTotal = cart.reduce((s, i) => s + i.unit_price * i.qty, 0);
+        var discAmount = Math.round(cartTotal * discPct / 100);
+        document.getElementById('discountInput').value = discAmount;
+        updateTotals();
+    } else {
+        discBar.style.display = 'none';
+    }
+
+    // Load purchase history — auto-open
+    document.getElementById('clientHistoryPanel').style.display = 'block';
+    document.getElementById('clientHistoryBody').style.display = 'block';
+    historyOpen = true;
+    document.getElementById('historyChevron').textContent = '▲';
+    loadClientHistory(id);
 }
-function clearCustomer() { selectedClientId = null; selectedClientName = 'Walk-in Customer'; document.getElementById('selectedCustomer').style.display = 'none'; }
+
+function clearCustomer() {
+    selectedClientId = null;
+    selectedClientName = 'Walk-in Customer';
+    currentClientGrade = '';
+    gradeDiscountApplied = 0;
+    document.getElementById('selectedCustomer').style.display = 'none';
+    document.getElementById('gradeTag').innerHTML = '';
+    document.getElementById('gradeDiscountBar').style.display = 'none';
+    document.getElementById('clientHistoryPanel').style.display = 'none';
+    document.getElementById('discountInput').value = 0;
+    updateTotals();
+}
+
+function toggleHistory() {
+    historyOpen = !historyOpen;
+    document.getElementById('clientHistoryBody').style.display = historyOpen ? 'block' : 'none';
+    document.getElementById('historyChevron').textContent = historyOpen ? '▲' : '▼';
+}
+
+function loadClientHistory(clientId) {
+    var body = document.getElementById('clientHistoryBody');
+    body.innerHTML = '<div style="text-align:center;padding:14px;color:#9ca3af;font-size:12px;"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+    fetch('ajax/pos_ajax.php?action=get_client_history&client_id=' + clientId)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success || !data.sales || !data.sales.length) {
+                body.innerHTML = '<div style="text-align:center;padding:14px;color:#9ca3af;font-size:12px;"><i class="fas fa-receipt"></i> No purchase history yet</div>';
+                return;
+            }
+            var s = data.summary;
+            var html = '<div class="ch-summary">' +
+                '<strong>' + s.count + '</strong> total purchase' + (s.count !== 1 ? 's' : '') +
+                ' &nbsp;·&nbsp; <strong>LL ' + Math.round(s.total).toLocaleString() + '</strong> total spent' +
+                '</div>';
+            data.sales.forEach(function(sale) {
+                var d = new Date(sale.date);
+                var dateStr = d.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun',
+                    'Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getFullYear();
+                var itemsStr = sale.items.map(function(i) {
+                    return i.product_name + ' \u00d7' + parseFloat(i.qty);
+                }).join(', ');
+                if (sale.items.length === 5) itemsStr += '\u2026';
+                var statusCol = sale.status === 'refunded' ? '#ef4444' : '#10b981';
+                html += '<div class="ch-sale">' +
+                    '<div class="ch-sale-header">' +
+                    '<span class="ch-sale-id">Sale #' + sale.id +
+                        ' <span style="color:' + statusCol + ';text-transform:uppercase;font-size:10px;">' + sale.status + '</span></span>' +
+                    '<span class="ch-sale-total">LL ' + Math.round(sale.total_with_vat).toLocaleString() + '</span>' +
+                    '</div>' +
+                    '<div class="ch-sale-date">' + dateStr + ' &nbsp;&middot;&nbsp; ' + sale.payment_method + '</div>' +
+                    (itemsStr ? '<div class="ch-sale-items">' + itemsStr + '</div>' : '') +
+                    '</div>';
+            });
+            body.innerHTML = html;
+        })
+        .catch(function(err) {
+            body.innerHTML = '<div style="text-align:center;padding:14px;color:#ef4444;font-size:12px;">Error loading history: ' + err.message + '</div>';
+        });
+}
 document.addEventListener('click', e => { if (!e.target.closest('.customer-search-wrap')) document.getElementById('customerDropdown').classList.remove('show'); });
 
 // ── Settings passed from PHP ──────────────────────────────────────────────
@@ -1236,11 +1403,8 @@ function newSale() {
     document.getElementById('receiptModal').classList.remove('show');
     cart = [];
     currentSaleId = null;
-    selectedClientId = null;
-    selectedClientName = 'Walk-in Customer';
     paymentMethod = 'cash';
 
-    // Reset inputs safely
     var discInput = document.getElementById('discountInput');
     if (discInput) discInput.value = 0;
     var paidUsdEl = document.getElementById('paidUsd');
@@ -1252,20 +1416,20 @@ function newSale() {
     if (gbu) gbu.value = '';
     if (gbl) gbl.value = '';
 
-    // Reset change box
     var changeBox = document.getElementById('changeBox');
     if (changeBox) changeBox.className = 'change-box';
 
-    // Reset confirm button
     var confirmBtn = document.getElementById('confirmChargeBtn');
     if (confirmBtn) {
         confirmBtn.disabled = true;
-        confirmBtn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm &amp; Charge $0.00';
+        confirmBtn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm &amp; Charge <span id="confirmTotal">LL 0</span>';
     }
 
     clearCustomer();
     renderCart();
+    updateTotals();
     loadProducts('', false);
+    if (searchInput) searchInput.value = '';
     searchInput.focus();
 }
 

@@ -14,7 +14,7 @@ if (empty($_SESSION['oop']) || empty($_SESSION['ooq'])) {
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)$_SESSION['ooq'];
 
-$conn = mysqli_connect("192.168.1.7", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
 if (!$conn) {
     echo json_encode(['success' => false, 'error' => 'DB connection failed']);
     exit();
@@ -22,15 +22,20 @@ if (!$conn) {
 mysqli_set_charset($conn, 'utf8mb4');
 
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
-require_once __DIR__ . '/pos_log.php';
 
 switch ($action) {
 
     // ── Search clients ─────────────────────────────────────────────────────
     case 'search_clients':
         $q = '%' . mysqli_real_escape_string($conn, $_GET['q'] ?? '') . '%';
+
+        // Check which columns exist in client table
+        $has_grade = mysqli_num_rows(mysqli_query($conn, "SHOW COLUMNS FROM client LIKE 'grade'")) > 0;
+        $has_loy   = mysqli_num_rows(mysqli_query($conn, "SHOW COLUMNS FROM client LIKE 'loy'"))   > 0;
+        $extra_cols = ($has_grade ? ', grade' : '') . ($has_loy ? ', loy' : '');
+
         $res = mysqli_query($conn,
-            "SELECT id, nom, prenom, company, number
+            "SELECT id, nom, prenom, company, number $extra_cols
              FROM client
              WHERE nom LIKE '$q' OR prenom LIKE '$q'
              OR company LIKE '$q' OR number LIKE '$q'
@@ -42,7 +47,9 @@ switch ($action) {
                 'id'      => $r['id'],
                 'name'    => trim(($r['prenom'] ?? '') . ' ' . ($r['nom'] ?? '')),
                 'company' => $r['company'] ?? '',
-                'number'  => $r['number'] ?? ''
+                'number'  => $r['number']  ?? '',
+                'grade'   => $has_grade ? ($r['grade'] ?? '') : '',
+                'loyalty' => $has_loy   ? ($r['loy']   ?? '') : '',
             ];
         }
         echo json_encode(['success' => true, 'data' => $clients]);
@@ -78,6 +85,42 @@ switch ($action) {
         $products = [];
         while ($r = mysqli_fetch_assoc($res)) $products[] = $r;
         echo json_encode(['success' => true, 'data' => $products]);
+        break;
+
+    // ── Get client purchase history ────────────────────────────────────────────
+    case 'get_client_history':
+        $client_id = (int)($_GET['client_id'] ?? 0);
+        if (!$client_id) { echo json_encode(['success'=>false,'error'=>'No client ID']); break; }
+        $co2 = mysqli_fetch_assoc(mysqli_query($conn, "SELECT vat_rate FROM company_settings LIMIT 1"));
+        $vat2 = 1 + (float)($co2['vat_rate'] ?? 0) / 100;
+        $sales_res = mysqli_query($conn,
+            "SELECT id, final_total, payment_method, status, created_at
+             FROM pos_sales WHERE client_id=$client_id
+             ORDER BY created_at DESC LIMIT 10"
+        );
+        $sales = [];
+        while ($s = mysqli_fetch_assoc($sales_res)) {
+            $items_res = mysqli_query($conn,
+                "SELECT product_name, qty, unit_price FROM pos_sale_items WHERE sale_id={$s['id']} LIMIT 5");
+            $items = [];
+            while ($it = mysqli_fetch_assoc($items_res)) $items[] = $it;
+            $sales[] = [
+                'id'             => $s['id'],
+                'total_with_vat' => round((float)$s['final_total'] * $vat2),
+                'payment_method' => $s['payment_method'],
+                'status'         => $s['status'],
+                'date'           => $s['created_at'],
+                'items'          => $items,
+            ];
+        }
+        $total_res = mysqli_fetch_assoc(mysqli_query($conn,
+            "SELECT COUNT(*) as cnt, SUM(final_total*$vat2) as total
+             FROM pos_sales WHERE client_id=$client_id AND status IN ('completed','pending')"
+        ));
+        echo json_encode(['success'=>true,'sales'=>$sales,'summary'=>[
+            'count' => (int)$total_res['cnt'],
+            'total' => round((float)$total_res['total']),
+        ]]);
         break;
 
     // ── Get product by ID ──────────────────────────────────────────────────
@@ -191,9 +234,6 @@ switch ($action) {
         }
 
         $usd_equiv = $usd_to_lbp > 0 ? round($final_total / $usd_to_lbp, 2) : 0;
-        posLog($conn, $agent_id, $agent_name, 'sale_completed',
-            "Sale #$sale_id — LL " . number_format($final_total) . " — $payment_method" . ($client_name !== 'Walk-in Customer' ? " — $client_name" : ''),
-            $sale_id, 'sale');
         echo json_encode([
             'success'       => true,
             'sale_id'       => $sale_id,
@@ -238,9 +278,7 @@ switch ($action) {
             "INSERT INTO stock_movements (product_id, product_name, type, qty_change, qty_before, qty_after, note, agent_id, agent_name)
              VALUES ($product_id, '$product_name', '$type', $qty_change, $qty_before, $qty_after, '$note', $agent_id, '$agent_name')"
         );
-        posLog($conn, $agent_id, $agent_name, 'stock_adjusted',
-            "$type — $product_name — qty change: $qty_change (before: $qty_before, after: $qty_after)" . ($note ? " — $note" : ''),
-            $product_id, 'product');
+
         echo json_encode(['success'=>true, 'qty_before'=>$qty_before, 'qty_after'=>$qty_after]);
         break;
 
