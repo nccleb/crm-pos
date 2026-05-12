@@ -2,7 +2,7 @@
 // Simple AJAX handler for tickets
 session_start();
 
-$host = "192.168.1.7";
+$host = "192.168.1.14";
 $user = "root";
 $pass = "1Sys9Admeen72";
 $db = "nccleb_test";

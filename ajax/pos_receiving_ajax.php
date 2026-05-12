@@ -16,7 +16,7 @@ $agent_id   = $_SESSION["ooq"];
 header('Content-Type: application/json');
 
 // ── DB Connection ──────────────────────────────────────────
-$db = new mysqli("192.168.1.7", "root", "1Sys9Admeen72", "nccleb_test");
+$db = new mysqli("192.168.1.14", "root", "1Sys9Admeen72", "nccleb_test");
 if ($db->connect_error) {
     echo json_encode(["error" => "DB connection failed: " . $db->connect_error]);
     exit;

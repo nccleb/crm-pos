@@ -9,7 +9,7 @@ $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 $is_super   = ($agent_name === 'super');
 
-$conn = mysqli_connect("192.168.1.7","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("192.168.1.14","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
 $usd_to_lbp = (float)(mysqli_fetch_assoc(mysqli_query($conn,
     "SELECT usd_to_lbp FROM company_settings LIMIT 1"))['usd_to_lbp'] ?? 89700);

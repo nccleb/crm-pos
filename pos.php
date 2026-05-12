@@ -8,7 +8,7 @@ $agent_name = $_SESSION['oop'];
 $agent_id   = (int)$_SESSION['ooq'];
 
 // DB for settings
-$conn = mysqli_connect("192.168.1.7", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("192.168.1.14", "root", "1Sys9Admeen72", "nccleb_test");
 mysqli_set_charset($conn, 'utf8mb4');
 
 // Load categories

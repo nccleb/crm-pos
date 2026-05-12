@@ -2,7 +2,7 @@
 header('Content-Type: application/json');
 
 // Database connection
-$conn = mysqli_connect("192.168.1.7", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("192.168.1.14", "root", "1Sys9Admeen72", "nccleb_test");
 if (!$conn) {
     die(json_encode(['error' => 'Connection failed: ' . mysqli_connect_error()]));
 }

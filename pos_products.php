@@ -4,18 +4,24 @@ if (empty($_SESSION['oop'])) { header("Location: login200.php"); exit(); }
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 
-$conn = mysqli_connect("192.168.1.7","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("192.168.1.14","root","1Sys9Admeen72","nccleb_test");
 $co_rate = mysqli_fetch_assoc(mysqli_query($conn, "SELECT usd_to_lbp FROM company_settings LIMIT 1"));
 $usd_to_lbp = (float)($co_rate['usd_to_lbp'] ?? 89500);
 mysqli_set_charset($conn,'utf8mb4');
 
 // Check if is_weighted column exists (requires pos_weight.sql to have been run)
-$col_check   = mysqli_query($conn, "SHOW COLUMNS FROM produit LIKE 'is_weighted'");
+$col_check    = mysqli_query($conn, "SHOW COLUMNS FROM produit LIKE 'is_weighted'");
 $has_weighted = $col_check && mysqli_num_rows($col_check) > 0;
 
+// Check if low_stock_threshold column exists
+$thr_check     = mysqli_query($conn, "SHOW COLUMNS FROM produit LIKE 'low_stock_threshold'");
+$has_threshold = $thr_check && mysqli_num_rows($thr_check) > 0;
+$thr_col       = $has_threshold ? ', low_stock_threshold' : '';
+
 $msg = ''; $msg_type = '';
-if (isset($_GET['msg']) && $_GET['msg']==='updated') { $msg='✅ Product updated successfully.'; $msg_type='success'; }
+if (isset($_GET['msg']) && $_GET['msg']==='updated')           { $msg='✅ Product updated successfully.';  $msg_type='success'; }
 if (isset($_GET['msg']) && $_GET['msg']==='barcode_generated') { $msg='✅ Barcode generated successfully.'; $msg_type='success'; }
+if (isset($_GET['msg']) && $_GET['msg']==='duplicated')        { $msg='✅ Product duplicated successfully. Stock set to 0 — update it before selling.'; $msg_type='success'; }
 
 // ── Handle actions ─────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -47,10 +53,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        if ($has_weighted) {
+        $thr_add = max(0, (float)($_POST['threshold'] ?? 5));
+
+        if ($has_weighted && $has_threshold) {
+            $r = mysqli_query($conn,
+                "INSERT INTO produit (nomp, category, price, cost_price, onhand, unit, description, barcode, ond, active, image, is_weighted, low_stock_threshold)
+                 VALUES ('$nomp','$category',$price,$cost,$onhand,'$unit','$desc','$barcode','$ond',1,'$image',$is_weighted,$thr_add)"
+            );
+        } elseif ($has_weighted) {
             $r = mysqli_query($conn,
                 "INSERT INTO produit (nomp, category, price, cost_price, onhand, unit, description, barcode, ond, active, image, is_weighted)
                  VALUES ('$nomp','$category',$price,$cost,$onhand,'$unit','$desc','$barcode','$ond',1,'$image',$is_weighted)"
+            );
+        } elseif ($has_threshold) {
+            $r = mysqli_query($conn,
+                "INSERT INTO produit (nomp, category, price, cost_price, onhand, unit, description, barcode, ond, active, image, low_stock_threshold)
+                 VALUES ('$nomp','$category',$price,$cost,$onhand,'$unit','$desc','$barcode','$ond',1,'$image',$thr_add)"
             );
         } else {
             $r = mysqli_query($conn,
@@ -102,12 +120,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $image_sql = ", image=''";
         }
 
-        $weighted_sql = $has_weighted ? ", is_weighted=$is_weighted" : '';
+        $weighted_sql   = $has_weighted  ? ", is_weighted=$is_weighted" : '';
+        $threshold_val  = max(0, (float)($_POST['threshold'] ?? 5));
+        $threshold_sql  = $has_threshold ? ", low_stock_threshold=$threshold_val" : '';
 
         mysqli_query($conn,
             "UPDATE produit SET nomp='$nomp', category='$category', price=$price,
              cost_price=$cost, onhand=$onhand, unit='$unit', description='$desc',
-             barcode='$barcode', active=$active $weighted_sql $image_sql WHERE codep=$id"
+             barcode='$barcode', active=$active $weighted_sql $threshold_sql $image_sql WHERE codep=$id"
         );
         $err = mysqli_error($conn);
         if ($err) {
@@ -129,6 +149,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $new_barcode = 'NCC-' . str_pad($id, 6, '0', STR_PAD_LEFT);
         mysqli_query($conn, "UPDATE produit SET barcode='$new_barcode' WHERE codep=$id AND (barcode='' OR barcode IS NULL)");
         header("Location: pos_products.php?msg=barcode_generated");
+        exit();
+    }
+
+    // Duplicate product
+    if (isset($_POST['duplicate_product'])) {
+        $id   = (int)$_POST['codep'];
+        $orig = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM produit WHERE codep=$id LIMIT 1"));
+        if ($orig) {
+            // Generate a unique name
+            $base_name = 'Copy of ' . $orig['nomp'];
+            $new_name  = $base_name;
+            $suffix    = 1;
+            while (mysqli_fetch_assoc(mysqli_query($conn, "SELECT codep FROM produit WHERE nomp='" . mysqli_real_escape_string($conn, $new_name) . "' LIMIT 1"))) {
+                $suffix++;
+                $new_name = $base_name . ' (' . $suffix . ')';
+            }
+
+            $new_name = mysqli_real_escape_string($conn, $new_name);
+            $cat      = mysqli_real_escape_string($conn, $orig['category'] ?? '');
+            $price    = (float)($orig['price']      ?? 0);
+            $cost     = (float)($orig['cost_price'] ?? 0);
+            $unit     = mysqli_real_escape_string($conn, $orig['unit'] ?? 'piece');
+            $desc     = mysqli_real_escape_string($conn, $orig['description'] ?? '');
+            $ond      = mysqli_real_escape_string($conn, $orig['ond'] ?? $unit);
+            $image    = mysqli_real_escape_string($conn, $orig['image'] ?? '');
+            $iswt     = $has_weighted ? (int)($orig['is_weighted'] ?? 0) : 0;
+            $thr      = $has_threshold ? (float)($orig['low_stock_threshold'] ?? 0) : 0;
+
+            $cols = "nomp, category, price, cost_price, onhand, unit, description, barcode, ond, active, image";
+            $vals = "'$new_name','$cat',$price,$cost,0,'$unit','$desc','','$ond',1,'$image'";
+            if ($has_weighted)  { $cols .= ", is_weighted";         $vals .= ", $iswt"; }
+            if ($has_threshold) { $cols .= ", low_stock_threshold"; $vals .= ", $thr";  }
+
+            $ok = mysqli_query($conn, "INSERT INTO produit ($cols) VALUES ($vals)");
+            if ($ok) {
+                header("Location: pos_products.php?msg=duplicated");
+                exit();
+            } else {
+                $msg = '❌ Duplicate failed: ' . mysqli_error($conn); $msg_type = 'error';
+            }
+        }
+    }
+
+    // Save low stock threshold per product
+    if (isset($_POST['save_threshold']) && $has_threshold) {
+        $id  = (int)$_POST['codep'];
+        $thr = max(0, (float)$_POST['threshold']);
+        mysqli_query($conn, "UPDATE produit SET low_stock_threshold=$thr WHERE codep=$id");
+        header("Location: pos_products.php?msg=updated");
         exit();
     }
 }
@@ -161,9 +230,9 @@ $stats = mysqli_fetch_assoc(mysqli_query($conn,
     "SELECT COUNT(*) as total,
      SUM(CASE WHEN active=1 THEN 1 ELSE 0 END) as active_count,
      SUM(CASE WHEN onhand <= 0 AND active=1 " . ($has_weighted ? "AND (is_weighted IS NULL OR is_weighted=0)" : "") . " THEN 1 ELSE 0 END) as out_of_stock,
-     SUM(CASE WHEN onhand > 0 AND onhand <= 5 AND active=1 " . ($has_weighted ? "AND (is_weighted IS NULL OR is_weighted=0)" : "") . " THEN 1 ELSE 0 END) as low_stock,
-     SUM(onhand * cost_price) as stock_value
-     FROM produit"
+     SUM(CASE WHEN onhand > 0 AND " . ($has_threshold ? "low_stock_threshold > 0 AND onhand <= low_stock_threshold" : "onhand <= 5") . " AND active=1 " . ($has_weighted ? "AND (is_weighted IS NULL OR is_weighted=0)" : "") . " THEN 1 ELSE 0 END) as low_stock,
+     SUM(CASE WHEN active=1 THEN onhand * cost_price ELSE 0 END) as stock_value
+     FROM produit WHERE active=1"
 ));
 ?>
 <!DOCTYPE html>
@@ -267,10 +336,75 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 <div class="stats">
     <div class="stat"><div class="val"><?= $stats['active_count'] ?></div><div class="lbl">Active Products</div></div>
     <div class="stat red"><div class="val"><?= $stats['out_of_stock'] ?></div><div class="lbl">Out of Stock</div></div>
-    <div class="stat orange"><div class="val"><?= $stats['low_stock'] ?></div><div class="lbl">Low Stock (≤5)</div></div>
+    <div class="stat orange"><div class="val"><?= $stats['low_stock'] ?></div><div class="lbl">Low Stock</div></div>
     <div class="stat green"><div class="val">LL <?= number_format(round($stats['stock_value'] ?? 0), 0) ?></div><div class="lbl">Stock Value (Cost)</div></div>
-    <div class="stat"><div class="val"><?= $stats['total'] ?></div><div class="lbl">Total Products</div></div>
+    <div class="stat"><div class="val"><?= $stats['active_count'] ?></div><div class="lbl">Total Active</div></div>
 </div>
+
+<?php
+// Low stock alert banner
+if ($has_threshold) {
+    $alert_res = mysqli_query($conn,
+        "SELECT codep, nomp, onhand, low_stock_threshold, unit, category
+         FROM produit
+         WHERE active=1 AND onhand > 0
+           AND low_stock_threshold > 0
+           AND onhand <= low_stock_threshold
+           " . ($has_weighted ? "AND (is_weighted IS NULL OR is_weighted=0)" : "") . "
+         ORDER BY (onhand/low_stock_threshold) ASC"
+    );
+    $alert_products = [];
+    while ($r = mysqli_fetch_assoc($alert_res)) $alert_products[] = $r;
+
+    $outstock_res = mysqli_query($conn,
+        "SELECT codep, nomp, unit, category FROM produit
+         WHERE active=1 AND onhand <= 0
+         " . ($has_weighted ? "AND (is_weighted IS NULL OR is_weighted=0)" : "") . "
+         LIMIT 10"
+    );
+    $outstock_products = [];
+    while ($r = mysqli_fetch_assoc($outstock_res)) $outstock_products[] = $r;
+
+    if (!empty($outstock_products) || !empty($alert_products)):
+?>
+<div style="margin-bottom:18px;">
+    <?php if (!empty($outstock_products)): ?>
+    <div style="background:#fee2e2;border-left:4px solid #ef4444;border-radius:10px;padding:14px 18px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <i class="fas fa-exclamation-circle" style="color:#ef4444;font-size:16px;"></i>
+            <strong style="color:#991b1b;font-size:13px;">OUT OF STOCK — <?= count($outstock_products) ?> product<?= count($outstock_products)>1?'s':'' ?></strong>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <?php foreach ($outstock_products as $op): ?>
+            <span style="background:white;border:1px solid #fca5a5;border-radius:6px;padding:3px 10px;font-size:12px;color:#7f1d1d;font-weight:600;">
+                <?= htmlspecialchars($op['nomp']) ?>
+            </span>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <?php if (!empty($alert_products)): ?>
+    <div style="background:#fff7ed;border-left:4px solid #f59e0b;border-radius:10px;padding:14px 18px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <i class="fas fa-exclamation-triangle" style="color:#f59e0b;font-size:16px;"></i>
+            <strong style="color:#92400e;font-size:13px;">LOW STOCK — <?= count($alert_products) ?> product<?= count($alert_products)>1?'s':'' ?> below threshold</strong>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <?php foreach ($alert_products as $ap):
+                $pct = $ap['low_stock_threshold'] > 0 ? round($ap['onhand'] / $ap['low_stock_threshold'] * 100) : 0;
+            ?>
+            <span style="background:white;border:1px solid #fcd34d;border-radius:6px;padding:3px 10px;font-size:12px;color:#92400e;font-weight:600;"
+                  title="Threshold: <?= $ap['low_stock_threshold'] ?> <?= $ap['unit'] ?>">
+                <?= htmlspecialchars($ap['nomp']) ?> — <?= $ap['onhand'] ?> <?= $ap['unit'] ?>
+                <span style="color:#f59e0b;">(<?= $pct ?>%)</span>
+            </span>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    <?php endif; ?>
+</div>
+<?php endif; } ?>
 
 <!-- Add Product -->
 <div class="card" style="margin-bottom:20px;">
@@ -327,6 +461,12 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
                     <input type="number" name="onhand" min="0" step="0.001" value="0">
                     <small id="add_stock_hint" style="color:#9ca3af;font-size:.75rem;display:none;">Enter in kg — e.g. 5.500 for 5.5kg</small>
                 </div>
+                <?php if ($has_threshold): ?>
+                <div class="form-group">
+                    <label><i class="fas fa-bell" style="color:#f59e0b;font-size:12px;"></i> Low Stock Alert Threshold</label>
+                    <input type="number" name="threshold" min="0" step="0.001" value="0" placeholder="0 = no alert, enter qty to trigger alert">
+                </div>
+                <?php endif; ?>
             </div>
             <div class="form-row">
                 <div class="form-group">
@@ -447,6 +587,15 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
                             title="Edit product">
                             <i class="fas fa-edit"></i>
                         </button>
+                        <!-- Duplicate -->
+                        <form method="POST" style="display:inline;" onsubmit="return confirm('Duplicate this product? Stock will be set to 0.')">
+                            <input type="hidden" name="codep" value="<?= $p['codep'] ?>">
+                            <button type="submit" name="duplicate_product" class="btn btn-sm"
+                                title="Duplicate: <?= htmlspecialchars($p['nomp']) ?>"
+                                style="background:#10b981;color:white;">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </form>
                         <?php if (!empty($p['barcode'])): ?>
                         <button class="btn btn-sm" onclick="printBarcode(<?= $p['codep'] ?>, <?= htmlspecialchars(json_encode($p['nomp'])) ?>, <?= htmlspecialchars(json_encode($p['barcode'])) ?>, <?= (float)$p['price'] ?>)"
                             title="Print barcode label"
@@ -541,6 +690,13 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
                         <label>Stock (qty)</label>
                         <input type="number" name="onhand" id="edit_onhand" min="0" step="0.001" onwheel="this.blur()">
                     </div>
+                    <?php if ($has_threshold): ?>
+                    <div class="form-group">
+                        <label><i class="fas fa-bell" style="color:#f59e0b;"></i> Low Stock Alert Threshold</label>
+                        <input type="number" name="threshold" id="edit_threshold" min="0" step="0.001" onwheel="this.blur()"
+                               placeholder="e.g. 5 — alert when stock drops below this">
+                    </div>
+                    <?php endif; ?>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
@@ -593,6 +749,8 @@ function openEdit(p) {
     document.getElementById('edit_price').value    = String(Math.round(p.price));
     document.getElementById('edit_cost').value     = String(Math.round(p.cost_price || 0));
     document.getElementById('edit_onhand').value   = p.onhand;
+    var thrEl = document.getElementById('edit_threshold');
+    if (thrEl) thrEl.value = p.low_stock_threshold !== undefined ? p.low_stock_threshold : 5;
     document.getElementById('edit_unit').value     = p.unit || 'piece';
     document.getElementById('edit_barcode').value  = p.barcode || '';
     document.getElementById('edit_desc').value     = p.description || '';
