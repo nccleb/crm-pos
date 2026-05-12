@@ -14,12 +14,14 @@ if (empty($_SESSION['oop']) || empty($_SESSION['ooq'])) {
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)$_SESSION['ooq'];
 
-$conn = mysqli_connect("172.18.208.1", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("192.168.1.14", "root", "1Sys9Admeen72", "nccleb_test");
 if (!$conn) {
     echo json_encode(['success' => false, 'error' => 'DB connection failed']);
     exit();
 }
 mysqli_set_charset($conn, 'utf8mb4');
+
+require_once __DIR__ . '/pos_log.php';
 
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
@@ -28,14 +30,8 @@ switch ($action) {
     // ── Search clients ─────────────────────────────────────────────────────
     case 'search_clients':
         $q = '%' . mysqli_real_escape_string($conn, $_GET['q'] ?? '') . '%';
-
-        // Check which columns exist in client table
-        $has_grade = mysqli_num_rows(mysqli_query($conn, "SHOW COLUMNS FROM client LIKE 'grade'")) > 0;
-        $has_loy   = mysqli_num_rows(mysqli_query($conn, "SHOW COLUMNS FROM client LIKE 'loy'"))   > 0;
-        $extra_cols = ($has_grade ? ', grade' : '') . ($has_loy ? ', loy' : '');
-
         $res = mysqli_query($conn,
-            "SELECT id, nom, prenom, company, number $extra_cols
+            "SELECT id, nom, prenom, company, number
              FROM client
              WHERE nom LIKE '$q' OR prenom LIKE '$q'
              OR company LIKE '$q' OR number LIKE '$q'
@@ -47,9 +43,7 @@ switch ($action) {
                 'id'      => $r['id'],
                 'name'    => trim(($r['prenom'] ?? '') . ' ' . ($r['nom'] ?? '')),
                 'company' => $r['company'] ?? '',
-                'number'  => $r['number']  ?? '',
-                'grade'   => $has_grade ? ($r['grade'] ?? '') : '',
-                'loyalty' => $has_loy   ? ($r['loy']   ?? '') : '',
+                'number'  => $r['number'] ?? ''
             ];
         }
         echo json_encode(['success' => true, 'data' => $clients]);
@@ -61,21 +55,16 @@ switch ($action) {
         $cat = trim($_GET['cat'] ?? '');
         $cat_sql = $cat ? "AND category = '" . mysqli_real_escape_string($conn, $cat) . "'" : '';
 
-        // Check if is_weighted column exists (requires pos_weight.sql to have been run)
-        $col_check  = mysqli_query($conn, "SHOW COLUMNS FROM produit LIKE 'is_weighted'");
-        $has_weight = $col_check && mysqli_num_rows($col_check) > 0;
-        $weight_col = $has_weight ? ', is_weighted' : ', 0 AS is_weighted';
-
         if ($raw === '') {
             $res = mysqli_query($conn,
-                "SELECT codep, nomp, price, onhand, unit, category, image, barcode $weight_col
+                "SELECT codep, nomp, price, onhand, unit, category, image, barcode
                  FROM produit WHERE active = 1 $cat_sql
                  ORDER BY nomp LIMIT 500"
             );
         } else {
             $q = '%' . mysqli_real_escape_string($conn, $raw) . '%';
             $res = mysqli_query($conn,
-                "SELECT codep, nomp, price, onhand, unit, category, image, barcode $weight_col
+                "SELECT codep, nomp, price, onhand, unit, category, image, barcode
                  FROM produit
                  WHERE active = 1 $cat_sql
                  AND (nomp LIKE '$q' OR barcode LIKE '$q')
@@ -85,42 +74,6 @@ switch ($action) {
         $products = [];
         while ($r = mysqli_fetch_assoc($res)) $products[] = $r;
         echo json_encode(['success' => true, 'data' => $products]);
-        break;
-
-    // ── Get client purchase history ────────────────────────────────────────────
-    case 'get_client_history':
-        $client_id = (int)($_GET['client_id'] ?? 0);
-        if (!$client_id) { echo json_encode(['success'=>false,'error'=>'No client ID']); break; }
-        $co2 = mysqli_fetch_assoc(mysqli_query($conn, "SELECT vat_rate FROM company_settings LIMIT 1"));
-        $vat2 = 1 + (float)($co2['vat_rate'] ?? 0) / 100;
-        $sales_res = mysqli_query($conn,
-            "SELECT id, final_total, payment_method, status, created_at
-             FROM pos_sales WHERE client_id=$client_id
-             ORDER BY created_at DESC LIMIT 10"
-        );
-        $sales = [];
-        while ($s = mysqli_fetch_assoc($sales_res)) {
-            $items_res = mysqli_query($conn,
-                "SELECT product_name, qty, unit_price FROM pos_sale_items WHERE sale_id={$s['id']} LIMIT 5");
-            $items = [];
-            while ($it = mysqli_fetch_assoc($items_res)) $items[] = $it;
-            $sales[] = [
-                'id'             => $s['id'],
-                'total_with_vat' => round((float)$s['final_total'] * $vat2),
-                'payment_method' => $s['payment_method'],
-                'status'         => $s['status'],
-                'date'           => $s['created_at'],
-                'items'          => $items,
-            ];
-        }
-        $total_res = mysqli_fetch_assoc(mysqli_query($conn,
-            "SELECT COUNT(*) as cnt, SUM(final_total*$vat2) as total
-             FROM pos_sales WHERE client_id=$client_id AND status IN ('completed','pending')"
-        ));
-        echo json_encode(['success'=>true,'sales'=>$sales,'summary'=>[
-            'count' => (int)$total_res['cnt'],
-            'total' => round((float)$total_res['total']),
-        ]]);
         break;
 
     // ── Get product by ID ──────────────────────────────────────────────────
@@ -145,8 +98,7 @@ switch ($action) {
         $items          = json_decode($_POST['items'] ?? '[]', true);
         $paid_usd       = (float)($_POST['paid_usd']   ?? 0);
         $paid_lbp       = (float)($_POST['paid_lbp']   ?? 0);
-        $change_usd     = (float)($_POST['change_usd'] ?? 0);  // USD bills to return
-        $change_lbp     = (float)($_POST['change_lbp'] ?? 0);  // LBP remainder to return
+        // change_usd / change_lbp from frontend are ignored — computed server-side below
 
         // Get exchange rate AND VAT rate
         $co_rate    = mysqli_fetch_assoc(mysqli_query($conn, "SELECT usd_to_lbp, vat_rate FROM company_settings LIMIT 1"));
@@ -159,29 +111,33 @@ switch ($action) {
         }
 
         // Items come in as LBP prices — convert to USD for DB storage
-        // All amounts stored in LBP directly — no USD conversion
         $total = 0;
         foreach ($items as $item) {
-            $total += (float)$item['unit_price'] * (float)$item['qty'];
+            $lbp_price = (float)$item['unit_price'];
+            $usd_price = $lbp_price / $usd_to_lbp;
+            $total += $usd_price * (int)$item['qty'];
         }
-        $discount_lbp = $discount;               // discount arrives in LBP
-        $final_total  = max(0, $total - $discount_lbp); // pre-VAT, stored in LBP
-        // change_usd / change_lbp already computed by frontend and passed in POST
+        $discount_usd = $discount / $usd_to_lbp;                        // discount arrives in LBP — convert to USD
+        $final_total  = max(0, $total - $discount_usd);                  // pre-VAT, pre-LBP
+
+        // Change/remaining — computed server-side in LBP, change_usd always 0
+        // Smallest usable denomination in Lebanon = LL 5,000
+        $note           = 5000;
+        $total_due_lbp  = round($final_total * (1 + $vat_rate / 100) * $usd_to_lbp / $note) * $note;
+        $total_paid_lbp = round($paid_lbp) + round($paid_usd * $usd_to_lbp);
+        $net_lbp        = $total_paid_lbp - $total_due_lbp;
+        $change_lbp     = $net_lbp >= 0 ? floor($net_lbp / $note) * $note : 0; // floor change (favour store)
+        $change_usd     = 0;
 
         // Insert sale header
         $client_id_sql = $client_id ? $client_id : 'NULL';
-        try {
-            $insert = mysqli_query($conn,
-                "INSERT INTO pos_sales (client_id, client_name, total, discount, final_total, payment_method, currency, notes, agent_id, agent_name, paid_usd, paid_lbp, change_usd, change_lbp, status)
-                 VALUES ($client_id_sql, '$client_name', $total, $discount_lbp, $final_total, '$payment_method', '$currency', '$notes', $agent_id, '$agent_name', $paid_usd, $paid_lbp, $change_usd, $change_lbp, 'completed')"
-            );
-        } catch (Exception $e) {
-            echo json_encode(['success' => false, 'error' => 'DB error: ' . $e->getMessage()]);
-            break;
-        }
+        $insert = mysqli_query($conn,
+            "INSERT INTO pos_sales (client_id, client_name, total, discount, final_total, payment_method, currency, notes, agent_id, agent_name, paid_usd, paid_lbp, change_usd, change_lbp)
+             VALUES ($client_id_sql, '$client_name', $total, $discount_usd, $final_total, '$payment_method', '$currency', '$notes', $agent_id, '$agent_name', $paid_usd, $paid_lbp, $change_usd, $change_lbp)"
+        );
 
         if (!$insert) {
-            echo json_encode(['success' => false, 'error' => 'DB error: ' . mysqli_error($conn)]);
+            echo json_encode(['success' => false, 'error' => 'Failed to create sale']);
             break;
         }
 
@@ -189,26 +145,28 @@ switch ($action) {
 
         // Insert sale items, update stock and log movements
         foreach ($items as $item) {
-            $product_id     = (int)$item['product_id'];
-            $product_name   = mysqli_real_escape_string($conn, $item['product_name']);
-            $qty            = (float)$item['qty'];          // float — supports 0.750 kg
-            $is_weighted    = !empty($item['is_weighted']) ? 1 : 0;
-            $unit_price = (float)$item['unit_price'];  // stored in LBP directly
-            $subtotal   = $qty * $unit_price;
+            $product_id   = (int)$item['product_id'];
+            $product_name = mysqli_real_escape_string($conn, $item['product_name']);
+            $qty          = (int)$item['qty'];
+            $unit_price_lbp = (float)$item['unit_price'];
+            $unit_price   = $unit_price_lbp / $usd_to_lbp; // convert to USD for DB
+            $subtotal     = $qty * $unit_price;
 
             mysqli_query($conn,
                 "INSERT INTO pos_sale_items (sale_id, product_id, product_name, qty, unit_price, subtotal)
                  VALUES ($sale_id, $product_id, '$product_name', $qty, $unit_price, $subtotal)"
             );
 
-            // Stock deduction — works for both pieces and kg
+            // Get stock before update
             $stock_row  = mysqli_fetch_assoc(mysqli_query($conn, "SELECT onhand FROM produit WHERE codep = $product_id LIMIT 1"));
-            $qty_before = (float)($stock_row['onhand'] ?? 0);
-            $qty_after  = max(0, round($qty_before - $qty, 3));
-            $qty_change = round($qty_after - $qty_before, 3);
+            $qty_before = (int)($stock_row['onhand'] ?? 0);
+            $qty_after  = max(0, $qty_before - $qty);
+            $qty_change = $qty_after - $qty_before;
 
+            // Update stock
             mysqli_query($conn, "UPDATE produit SET onhand = $qty_after WHERE codep = $product_id");
 
+            // Log movement
             mysqli_query($conn,
                 "INSERT INTO stock_movements (product_id, product_name, type, qty_change, qty_before, qty_after, reference_id, note, agent_id, agent_name)
                  VALUES ($product_id, '$product_name', 'sale', $qty_change, $qty_before, $qty_after, $sale_id, 'Sale #$sale_id', $agent_id, '$agent_name')"
@@ -233,12 +191,14 @@ switch ($action) {
             $drawer_result = openCashDrawer($conn);
         }
 
-        $usd_equiv = $usd_to_lbp > 0 ? round($final_total / $usd_to_lbp, 2) : 0;
+        // ── Log activity ───────────────────────────────────────────────────
+        $log_details = "Sale #$sale_id — LL " . number_format(round($final_total * (1 + $vat_rate / 100) * $usd_to_lbp / 5000) * 5000) . " — $payment_method — $client_name";
+        posLog($conn, $agent_id, $agent_name, 'sale_completed', $log_details, $sale_id, 'sale');
+
         echo json_encode([
             'success'       => true,
             'sale_id'       => $sale_id,
             'final_total'   => $final_total,
-            'usd_equiv'     => $usd_equiv,
             'print_result'  => $print_result,
             'drawer_result' => $drawer_result
         ]);
@@ -278,6 +238,10 @@ switch ($action) {
             "INSERT INTO stock_movements (product_id, product_name, type, qty_change, qty_before, qty_after, note, agent_id, agent_name)
              VALUES ($product_id, '$product_name', '$type', $qty_change, $qty_before, $qty_after, '$note', $agent_id, '$agent_name')"
         );
+
+        posLog($conn, $agent_id, $agent_name, 'stock_adjusted',
+            "$type — $product_name — qty $qty_change (before: $qty_before → after: $qty_after)" . ($note ? " — $note" : ''),
+            $product_id, 'product');
 
         echo json_encode(['success'=>true, 'qty_before'=>$qty_before, 'qty_after'=>$qty_after]);
         break;
