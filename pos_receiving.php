@@ -115,8 +115,6 @@ body  { background:#f1f5f9; font-size:.9rem; }
     <a href="pos_expiry.php"><i class="bi bi-calendar-x"></i> Expiry</a>
     <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
     <a href="pos_products.php"><i class="bi bi-box-seam"></i> Products</a>
-    <a href="pos_reorder.php"><i class="bi bi-truck"></i> Reorder</a>
-    <a href="pos_expiry_alerts.php"><i class="bi bi-bell"></i> Expiry Alerts</a>
     <a href="pos_stock.php"><i class="bi bi-graph-up"></i> Stock</a>
     <?php if($is_super): ?>
     <a href="pos_settings.php"><i class="bi bi-gear"></i> Settings</a>
@@ -347,7 +345,7 @@ async function doSearch() {
         &nbsp;|&nbsp; Category: ${esc(p.category||'—')}</span>
       </div>
       <div class="text-end">
-        <div class="stock-badge">Cost: $${parseFloat(p.cost_price||0).toFixed(2)}</div>
+        <div class="stock-badge">Cost: LL ${Math.round(parseFloat(p.cost_price||0)).toLocaleString()}</div>
       </div>
     </div>
   `).join('');
