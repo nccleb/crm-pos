@@ -270,6 +270,7 @@ tr:hover td { background:#fafafa; }
         <a href="pos.php"><i class="fas fa-cash-register"></i> POS</a>
         <a href="pos_sales.php"><i class="fas fa-history"></i> Sales</a>
         <a href="pos_reports.php"><i class="fas fa-chart-pie"></i> Reports</a>
+        <a href="pos_reorder.php"><i class="fas fa-truck-loading"></i> Reorder</a>
         <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
         <a href="test204.php?page=<?= urlencode($agent_name) ?>&page1=<?= $agent_id ?>"><i class="fas fa-arrow-left"></i> CRM</a>
     </div>

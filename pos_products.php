@@ -322,6 +322,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
     <a href="pos_receiving.php"><i class="fas fa-truck-loading"></i> Receiving</a>
     <a href="pos_expiry.php"><i class="fas fa-calendar-times"></i> Expiry</a>
     <a href="pos_suppliers.php"><i class="fas fa-building"></i> Suppliers</a>
+    <a href="pos_reorder.php"><i class="fas fa-truck-loading"></i> Reorder</a>
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
     <a href="test204.php?page=<?= urlencode($agent_name) ?>&page1=<?= $agent_id ?>"><i class="fas fa-arrow-left"></i> CRM</a>
 </div>

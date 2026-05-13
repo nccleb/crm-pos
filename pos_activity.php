@@ -124,6 +124,7 @@ tr:hover td { background:#fafafa; }
     <h1><i class="fas fa-history"></i> Activity Log</h1>
     <a href="pos.php"><i class="fas fa-cash-register"></i> POS</a>
     <a href="pos_products.php"><i class="fas fa-box"></i> Products</a>
+    <a href="pos_reorder.php"><i class="fas fa-truck-loading"></i> Reorder</a>
     <?php if ($is_super): ?>
     <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
     <?php endif; ?>
