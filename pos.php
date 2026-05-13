@@ -8,7 +8,7 @@ $agent_name = $_SESSION['oop'];
 $agent_id   = (int)$_SESSION['ooq'];
 
 // DB for settings
-$conn = mysqli_connect("192.168.1.14", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("192.168.1.19", "root", "1Sys9Admeen72", "nccleb_test");
 mysqli_set_charset($conn, 'utf8mb4');
 
 // Load categories
@@ -292,6 +292,7 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
     <a href="pos_receiving.php"><i class="fas fa-truck-loading"></i> Receiving</a>
     <a href="pos_suppliers.php"><i class="fas fa-building"></i> Suppliers</a>
     <a href="pos_reorder.php"><i class="fas fa-truck-loading"></i> Reorder</a>
+    <a href="pos_expiry_alerts.php"><i class="fas fa-bell"></i> Expiry Alerts</a>
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
     <?php if ($agent_name === 'super'): ?>
     <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
@@ -702,7 +703,27 @@ searchInput.addEventListener('keydown', function(e) {
         clearTimeout(searchTimeout);
         var q = this.value.trim();
         if (!q) return;
-        loadProducts(q, true);
+
+        // ── Scale label detection ─────────────────────────────────────────
+        // EAN-13 prefix 2 = weighted item from in-store scale
+        if (/^2\d{12}$/.test(q)) {
+            if (!validateEAN13(q)) {
+                searchInput.style.borderColor = '#ef4444';
+                setTimeout(function() { searchInput.style.borderColor = ''; }, 1000);
+                showScaleToast('❌ Invalid barcode — check digit mismatch. Rescan the label.', 'error');
+                searchInput.value = '';
+                searchInput.focus();
+                return;
+            }
+            handleScaleBarcode(q);
+            return;
+        }
+        // ─────────────────────────────────────────────────────────────────
+
+        // ── Bundle barcode detection ──────────────────────────────────────
+        // Try resolving as a bundle wrapper before falling through to product search
+        tryBundleBarcode(q);
+        // ─────────────────────────────────────────────────────────────────
     }
 });
 
@@ -737,6 +758,188 @@ function addWeightedToCart(productId, productName, unitPrice, weightKg, unit) {
     applyPromotions();
     renderCart();
     applyGradeDiscount();
+}
+
+// ── EAN-13 check digit validator ──────────────────────────────────────────
+function validateEAN13(barcode) {
+    if (barcode.length !== 13) return false;
+    var sum = 0;
+    for (var i = 0; i < 12; i++) {
+        sum += parseInt(barcode[i]) * (i % 2 === 0 ? 1 : 3);
+    }
+    var check = (10 - (sum % 10)) % 10;
+    return check === parseInt(barcode[12]);
+}
+
+// ── Scale label handler ───────────────────────────────────────────────────
+// Called when scanner reads an EAN-13 barcode starting with "2"
+// Decodes PLU + weight, looks up product, adds to cart automatically
+function handleScaleBarcode(barcode) {
+    searchInput.value = '';
+    searchInput.style.borderColor = '#f59e0b';
+
+    fetch('ajax/pos_ajax.php?action=decode_scale_barcode&barcode=' + encodeURIComponent(barcode))
+        .then(r => r.json())
+        .then(data => {
+            searchInput.style.borderColor = '';
+
+            if (!data.success) {
+                // Show error — flash red + toast
+                searchInput.style.borderColor = '#ef4444';
+                setTimeout(function() { searchInput.style.borderColor = ''; }, 1000);
+                showScaleToast('❌ Scale label: ' + (data.error || 'Product not found')
+                    + (data.plu ? ' (PLU ' + data.plu + ')' : ''), 'error');
+                searchInput.focus();
+                return;
+            }
+
+            // Add to cart as a weighted line — no modal needed
+            addWeightedToCart(
+                data.product_id,
+                data.product_name,
+                data.price_per_kg_lbp,
+                data.weight_kg,
+                data.unit || 'kg'
+            );
+
+            // Flash green + show toast
+            searchInput.style.borderColor = '#10b981';
+            setTimeout(function() { searchInput.style.borderColor = ''; }, 700);
+
+            showScaleToast(
+                '⚖️  ' + data.product_name
+                + ' — ' + data.weight_kg.toFixed(3) + ' kg'
+                + ' — LL ' + Math.round(data.line_total_lbp).toLocaleString(),
+                'success'
+            );
+            loadProducts('', false);
+            searchInput.focus();
+        })
+        .catch(function() {
+            searchInput.style.borderColor = '#ef4444';
+            setTimeout(function() { searchInput.style.borderColor = ''; }, 1000);
+            showScaleToast('❌ Network error reading scale label', 'error');
+            searchInput.focus();
+        });
+}
+
+// ── Bundle barcode handler ────────────────────────────────────────────────
+// Tries to resolve barcode as a bundle wrapper.
+// If found → adds all components to cart at bundle price, no modal.
+// If not found → falls through to normal product search.
+function tryBundleBarcode(barcode) {
+    searchInput.style.borderColor = '#f59e0b'; // amber while resolving
+
+    fetch('ajax/pos_bundle_ajax.php?action=resolve&barcode=' + encodeURIComponent(barcode))
+        .then(r => r.json())
+        .then(data => {
+            searchInput.style.borderColor = '';
+
+            if (!data.is_bundle) {
+                // Not a bundle — fall through to normal product search
+                loadProducts(barcode, true);
+                return;
+            }
+
+            if (!data.success) {
+                // Is a bundle barcode but has a problem (no components etc.)
+                searchInput.style.borderColor = '#ef4444';
+                setTimeout(function() { searchInput.style.borderColor = ''; }, 1000);
+                showScaleToast('❌ Bundle error: ' + (data.error || 'Unknown error'), 'error');
+                searchInput.value = '';
+                searchInput.focus();
+                return;
+            }
+
+            // Add each component to cart at proportionally reduced price
+            data.items.forEach(function(item) {
+                var qty      = parseFloat(item.qty);
+                var price    = parseFloat(item.unit_price_lbp);
+                var isWeight = parseInt(item.is_weighted) === 1;
+
+                if (isWeight) {
+                    // Weighted component — add as weighted line
+                    cart.push({
+                        product_id:   parseInt(item.product_id),
+                        product_name: item.product_name,
+                        unit_price:   price,
+                        qty:          qty,
+                        is_weighted:  true,
+                        unit:         item.unit || 'kg',
+                        is_bundle_component: true,
+                        bundle_name:  data.bundle_name
+                    });
+                } else {
+                    // Regular component
+                    cart.push({
+                        product_id:   parseInt(item.product_id),
+                        product_name: item.product_name,
+                        unit_price:   price,
+                        qty:          qty,
+                        is_weighted:  false,
+                        unit:         item.unit || 'pc',
+                        is_bundle_component: true,
+                        bundle_name:  data.bundle_name
+                    });
+                }
+            });
+
+            applyPromotions();
+            renderCart();
+            applyGradeDiscount();
+
+            // Flash green + toast with bundle summary
+            searchInput.style.borderColor = '#10b981';
+            searchInput.value = '';
+            setTimeout(function() { searchInput.style.borderColor = ''; }, 700);
+
+            var savings = data.savings > 0
+                ? ' — Save LL ' + Math.round(data.savings).toLocaleString()
+                : '';
+            showScaleToast(
+                '🎁 ' + data.bundle_name
+                + ' — LL ' + Math.round(data.bundle_price).toLocaleString()
+                + savings,
+                'success'
+            );
+
+            loadProducts('', false);
+            searchInput.focus();
+        })
+        .catch(function() {
+            searchInput.style.borderColor = '';
+            // Network error — fall through to normal search
+            loadProducts(barcode, true);
+        });
+}
+function showScaleToast(msg, type) {
+    var existing = document.getElementById('scaleToast');
+    if (existing) existing.remove();
+    if (scaleToastTimer) clearTimeout(scaleToastTimer);
+
+    var t = document.createElement('div');
+    t.id = 'scaleToast';
+    t.style.cssText = [
+        'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
+        'padding:12px 22px', 'border-radius:10px', 'font-size:14px', 'font-weight:700',
+        'z-index:9999', 'box-shadow:0 8px 32px rgba(0,0,0,.2)',
+        'display:flex', 'align-items:center', 'gap:10px',
+        'animation:scaleToastIn .25s ease',
+        type === 'success'
+            ? 'background:#065f46;color:#6ee7b7;border:1px solid rgba(16,185,129,.3);'
+            : 'background:#7f1d1d;color:#fca5a5;border:1px solid rgba(239,68,68,.3);'
+    ].join(';');
+    t.innerHTML = msg;
+
+    // Add keyframe if not already added
+    if (!document.getElementById('scaleToastStyle')) {
+        var s = document.createElement('style');
+        s.id  = 'scaleToastStyle';
+        s.textContent = '@keyframes scaleToastIn{from{opacity:0;transform:translateX(-50%) translateY(12px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}';
+        document.head.appendChild(s);
+    }
+    document.body.appendChild(t);
+    scaleToastTimer = setTimeout(function() { if (t.parentNode) t.remove(); }, 4000);
 }
 
 function applyGradeDiscount() {
@@ -788,12 +991,15 @@ function renderCart() {
             var freeTag = item.is_promo_free
                 ? '<span style="font-size:10px;background:#16a34a;color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px;font-weight:700;">FREE</span>'
                 : '';
+            var bundleTag = item.is_bundle_component
+                ? '<span style="font-size:10px;background:#7c3aed;color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px;font-weight:700;">🎁 ' + escHtml(item.bundle_name || 'Bundle') + '</span>'
+                : '';
             var priceDisplay = item.is_promo_free
                 ? '<span style="text-decoration:line-through;color:#94a3b8;">LL ' + Math.round(item.unit_price).toLocaleString() + '</span> FREE'
                 : 'LL ' + Math.round(item.unit_price).toLocaleString() + ' / ' + (item.unit || 'pc');
-            return '<div class="cart-item"' + (item.is_promo_free ? ' style="border-left:3px solid #16a34a;"' : item.promo_label ? ' style="border-left:3px solid #dc2626;"' : '') + '>' +
+            return '<div class="cart-item"' + (item.is_promo_free ? ' style="border-left:3px solid #16a34a;"' : item.is_bundle_component ? ' style="border-left:3px solid #7c3aed;"' : item.promo_label ? ' style="border-left:3px solid #dc2626;"' : '') + '>' +
                 '<div class="cart-item-top">' +
-                    '<div class="item-name">' + escHtml(item.product_name) + promoTag + freeTag + '</div>' +
+                    '<div class="item-name">' + escHtml(item.product_name) + promoTag + freeTag + bundleTag + '</div>' +
                     '<div class="item-unit-price">' + priceDisplay + '</div>' +
                 '</div>' +
                 '<div class="cart-item-bottom">' +

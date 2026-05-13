@@ -9,7 +9,7 @@ $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 $is_super   = ($agent_name === 'super');
 
-$conn = mysqli_connect("192.168.1.14","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("192.168.1.19","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
 $usd_to_lbp = (float)(mysqli_fetch_assoc(mysqli_query($conn,
     "SELECT usd_to_lbp FROM company_settings LIMIT 1"))['usd_to_lbp'] ?? 89700);
@@ -123,6 +123,9 @@ input:checked + .slider:before { transform:translateX(20px); }
     <a href="pos_products.php"><i class="fas fa-box"></i> Products</a>
     <a href="pos_receiving.php"><i class="fas fa-truck-loading"></i> Receiving</a>
     <a href="pos_expiry.php"><i class="fas fa-calendar-times"></i> Expiry</a>
+    <a href="pos_reorder.php"><i class="fas fa-truck-loading"></i> Reorder</a>
+    <a href="pos_expiry_alerts.php"><i class="fas fa-bell"></i> Expiry Alerts</a>
+    <a href="pos_bundles.php"><i class="fas fa-layer-group"></i> Bundles</a>
     <a href="pos_sales.php"><i class="fas fa-history"></i> Sales</a>
     <?php if($is_super):?><a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a><?php endif;?>
     <a href="test204.php?page=<?=urlencode($agent_name)?>&page1=<?=$agent_id?>"><i class="fas fa-arrow-left"></i> CRM</a>

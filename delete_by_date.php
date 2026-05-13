@@ -1,6 +1,6 @@
 <?php
 session_start();
-$conn = mysqli_connect("192.168.1.14", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("192.168.1.19", "root", "1Sys9Admeen72", "nccleb_test");
 
 if (mysqli_connect_errno()) {
     echo "Failed to connect to MySQL: " . mysqli_connect_error();

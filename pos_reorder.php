@@ -10,7 +10,7 @@ $is_super   = ($_SESSION['oop'] === 'super');
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 
-$conn = mysqli_connect("192.168.1.14","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("192.168.1.19","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
 
 // ── Reorder suggestions ────────────────────────────────────────────────────
@@ -207,6 +207,7 @@ tr:last-child td{border-bottom:none;} tr:hover td{background:#fafbfc;}
     <a href="pos_receiving.php"><i class="fas fa-boxes"></i> Receiving</a>
     <a href="pos_suppliers.php"><i class="fas fa-building"></i> Suppliers</a>
     <a href="pos_products.php"><i class="fas fa-box"></i> Products</a>
+    <a href="pos_expiry_alerts.php"><i class="fas fa-bell"></i> Expiry Alerts</a>
     <span class="ml"><i class="fas fa-user"></i> <?= htmlspecialchars($agent_name) ?></span>
 </div>
 

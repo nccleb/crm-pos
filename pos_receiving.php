@@ -11,7 +11,7 @@ $agent_name = $_SESSION["oop"];
 $is_super   = ($agent_name === "super");
 
 // Get exchange rate + company settings
-$db = new mysqli("192.168.1.14", "root", "1Sys9Admeen72", "nccleb_test");
+$db = new mysqli("192.168.1.19", "root", "1Sys9Admeen72", "nccleb_test");
 $db->set_charset("utf8mb4");
 $settings   = $db->query("SELECT usd_to_lbp FROM company_settings LIMIT 1")->fetch_assoc();
 $usd_to_lbp = $settings ? (float)$settings["usd_to_lbp"] : 89700;
@@ -116,6 +116,7 @@ body  { background:#f1f5f9; font-size:.9rem; }
     <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
     <a href="pos_products.php"><i class="bi bi-box-seam"></i> Products</a>
     <a href="pos_reorder.php"><i class="bi bi-truck"></i> Reorder</a>
+    <a href="pos_expiry_alerts.php"><i class="bi bi-bell"></i> Expiry Alerts</a>
     <a href="pos_stock.php"><i class="bi bi-graph-up"></i> Stock</a>
     <?php if($is_super): ?>
     <a href="pos_settings.php"><i class="bi bi-gear"></i> Settings</a>

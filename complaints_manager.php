@@ -2,7 +2,7 @@
 session_start();
 
 // Database configuration
-define('DB_HOST', '192.168.1.14');
+define('DB_HOST', '192.168.1.19');
 define('DB_USER', 'root');
 define('DB_PASS', '1Sys9Admeen72');
 define('DB_NAME', 'nccleb_test');

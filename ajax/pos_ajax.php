@@ -14,7 +14,7 @@ if (empty($_SESSION['oop']) || empty($_SESSION['ooq'])) {
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)$_SESSION['ooq'];
 
-$conn = mysqli_connect("192.168.1.14", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("192.168.1.19", "root", "1Sys9Admeen72", "nccleb_test");
 if (!$conn) {
     echo json_encode(['success' => false, 'error' => 'DB connection failed']);
     exit();
@@ -246,6 +246,77 @@ switch ($action) {
         echo json_encode(['success'=>true, 'qty_before'=>$qty_before, 'qty_after'=>$qty_after]);
         break;
 
+
+    // ── Decode scale label barcode (EAN-13 prefix 2) ──────────────────────
+    case 'decode_scale_barcode':
+        $raw = trim($_GET['barcode'] ?? '');
+
+        // Validate: must be 13 digits starting with 2
+        if (!preg_match('/^2\d{12}$/', $raw)) {
+            echo json_encode(['success' => false, 'error' => 'Not a scale barcode']);
+            break;
+        }
+
+        // EAN-13 prefix-2 structure:
+        //  2 [PPPPP] [WWWWW] [C]
+        //  pos 0     = prefix "2"
+        //  pos 1–5   = PLU (5 digits) — maps to product codep or barcode
+        //  pos 6–10  = weight in grams (5 digits) OR price
+        //  pos 12    = check digit (ignored here)
+
+        $plu_str    = substr($raw, 1, 5);           // e.g. "00042"
+        $value_str  = substr($raw, 6, 5);           // e.g. "01250"
+        $plu_int    = (int)$plu_str;                // 42
+        $weight_kg  = (int)$value_str / 1000;       // 1.250 kg
+
+        // Look up product — first by codep, then by barcode field
+        $product = null;
+
+        $res = mysqli_query($conn, "SELECT codep, nomp, price, unit, category, onhand, barcode, is_weighted
+            FROM produit WHERE codep = $plu_int AND active = 1 LIMIT 1");
+        if ($res) $product = mysqli_fetch_assoc($res);
+
+        if (!$product) {
+            // Try matching the 5-digit PLU string against the barcode field
+            $plu_esc = mysqli_real_escape_string($conn, $plu_str);
+            $res2 = mysqli_query($conn, "SELECT codep, nomp, price, unit, category, onhand, barcode, is_weighted
+                FROM produit WHERE barcode LIKE '%$plu_esc%' AND active = 1 LIMIT 1");
+            if ($res2) $product = mysqli_fetch_assoc($res2);
+        }
+
+        if (!$product) {
+            echo json_encode([
+                'success' => false,
+                'error'   => "Product not found for PLU $plu_int",
+                'plu'     => $plu_int,
+                'weight'  => $weight_kg
+            ]);
+            break;
+        }
+
+        // Get company exchange rate
+        $co = mysqli_fetch_assoc(mysqli_query($conn, "SELECT usd_to_lbp FROM company_settings LIMIT 1"));
+        $usd_to_lbp = (float)($co['usd_to_lbp'] ?? 89500);
+
+        // Price stored in LBP directly (v4.0+)
+        $price_per_kg_lbp = (float)$product['price'];
+        $line_total_lbp   = round($price_per_kg_lbp * $weight_kg / 5000) * 5000;
+
+        echo json_encode([
+            'success'          => true,
+            'scale_label'      => true,
+            'plu'              => $plu_int,
+            'weight_kg'        => $weight_kg,
+            'product_id'       => (int)$product['codep'],
+            'product_name'     => $product['nomp'],
+            'price_per_kg_lbp' => $price_per_kg_lbp,
+            'line_total_lbp'   => $line_total_lbp,
+            'unit'             => $product['unit'] ?: 'kg',
+            'category'         => $product['category'] ?: '',
+            'onhand'           => (float)$product['onhand'],
+            'barcode_raw'      => $raw,
+        ]);
+        break;
 
     default:
         echo json_encode(['success' => false, 'error' => 'Unknown action']);

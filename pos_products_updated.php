@@ -4,7 +4,7 @@ if (empty($_SESSION['oop'])) { header("Location: login200.php"); exit(); }
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 
-$conn = mysqli_connect("192.168.1.14","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("192.168.1.19","root","1Sys9Admeen72","nccleb_test");
 $co_rate = mysqli_fetch_assoc(mysqli_query($conn, "SELECT usd_to_lbp FROM company_settings LIMIT 1"));
 $usd_to_lbp = (float)($co_rate['usd_to_lbp'] ?? 89500);
 mysqli_set_charset($conn,'utf8mb4');

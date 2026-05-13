@@ -5,7 +5,7 @@ $is_super   = ($_SESSION['oop'] === 'super');
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 
-$conn = mysqli_connect("192.168.1.14","root","1Sys9Admeen72","nccleb_test");
+$conn = mysqli_connect("192.168.1.19","root","1Sys9Admeen72","nccleb_test");
 mysqli_set_charset($conn,'utf8mb4');
 
 // ── Filters ────────────────────────────────────────────────────────────────
@@ -125,6 +125,8 @@ tr:hover td { background:#fafafa; }
     <a href="pos.php"><i class="fas fa-cash-register"></i> POS</a>
     <a href="pos_products.php"><i class="fas fa-box"></i> Products</a>
     <a href="pos_reorder.php"><i class="fas fa-truck-loading"></i> Reorder</a>
+    <a href="pos_expiry_alerts.php"><i class="fas fa-bell"></i> Expiry Alerts</a>
+    <a href="pos_bundles.php"><i class="fas fa-layer-group"></i> Bundles</a>
     <?php if ($is_super): ?>
     <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
     <?php endif; ?>
