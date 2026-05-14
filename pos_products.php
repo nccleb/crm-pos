@@ -7,6 +7,11 @@ $agent_id   = (int)($_SESSION['ooq'] ?? 0);
 $conn = mysqli_connect("192.168.1.19","root","1Sys9Admeen72","nccleb_test");
 $co_rate = mysqli_fetch_assoc(mysqli_query($conn, "SELECT usd_to_lbp FROM company_settings LIMIT 1"));
 $usd_to_lbp = (float)($co_rate['usd_to_lbp'] ?? 89500);
+
+// All active products for bulk USD shelf label print
+$all_for_bulk = [];
+$bulk_res = mysqli_query($conn, "SELECT codep, nomp, price, category, barcode FROM produit WHERE active=1 ORDER BY nomp ASC");
+while ($br = mysqli_fetch_assoc($bulk_res)) $all_for_bulk[] = $br;
 mysqli_set_charset($conn,'utf8mb4');
 
 // Check if is_weighted column exists (requires pos_weight.sql to have been run)
@@ -311,6 +316,12 @@ tr:hover td { background:#fafafa; }
 input[type=number]{-moz-appearance:textfield}
 input[type=number]::-webkit-outer-spin-button,
 input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.bulk-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;transition:background .15s;}
+.bulk-row:hover{background:#f8fafc;}
+.bulk-row input[type=checkbox]{width:16px;height:16px;cursor:pointer;flex-shrink:0;}
+.bulk-name{flex:1;font-size:13px;font-weight:600;color:#1a1a2e;}
+.bulk-cat{font-size:11px;color:#9ca3af;width:90px;text-align:right;}
+.bulk-price{font-size:13px;font-weight:800;color:#16a34a;width:60px;text-align:right;}
 </style>
 </head>
 <body>
@@ -506,6 +517,12 @@ if ($has_threshold) {
     <div class="card-header">
         <i class="fas fa-list"></i> Products
         <div class="actions">
+            <button onclick="openBulkModal()" class="btn btn-sm" style="background:#16a34a;color:white;font-weight:700;display:inline-flex;align-items:center;gap:6px;">
+                <i class="fas fa-tags"></i> Bulk USD Shelf Labels
+            </button>
+            <button onclick="openBulkBarcodeModal()" class="btn btn-sm" style="background:#7c3aed;color:white;font-weight:700;display:inline-flex;align-items:center;gap:6px;">
+                <i class="fas fa-barcode"></i> Bulk Barcode Labels
+            </button>
             <form method="GET" class="filters">
                 <input type="text" name="s" value="<?= htmlspecialchars($_GET['s'] ?? '') ?>" placeholder="Search...">
                 <select name="cat">
@@ -868,6 +885,15 @@ function toggleWeightedEdit(isW) {
         </div>
 
         <!-- Label size selector -->
+        <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;">
+            <label style="font-size:12px;font-weight:700;color:#6b7280;">Label Type:</label>
+            <select id="labelType" onchange="updateLabelPreview()"
+                style="flex:1;padding:6px 10px;border:2px solid #e5e7eb;border-radius:8px;font-size:12px;font-weight:700;">
+                <option value="barcode">Barcode Only (no price)</option>
+                <option value="usd">USD Shelf Label ($ price only)</option>
+                <option value="lbp">Standard LL (barcode + LL price)</option>
+            </select>
+        </div>
         <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;">
             <label style="font-size:12px;font-weight:700;color:#6b7280;">Copies:</label>
             <input type="number" id="labelCopies" value="1" min="1" max="100"
@@ -906,74 +932,98 @@ function printBarcode(id, name, barcode, price) {
     _bcProduct = name;
     _bcBarcode = barcode;
     _bcPrice   = price;
-
-    document.getElementById('labelProductName').textContent = name;
-    document.getElementById('labelPrice').textContent = 'LL ' + Math.round(price).toLocaleString();
-
-    JsBarcode('#barcodesvg', barcode, {
-        format:      'CODE128',
-        width:       2,
-        height:      50,
-        displayValue: true,
-        fontSize:    12,
-        margin:      4,
-    });
-
+    document.getElementById('labelType').value = 'barcode';
+    updateLabelPreview();
     document.getElementById('barcodeModal').style.display = 'flex';
 }
 
-function closeBarcodeModal() {
-    document.getElementById('barcodeModal').style.display = 'none';
+function updateLabelPreview() {
+    var type     = document.getElementById('labelType').value;
+    var usd      = USD_TO_LBP > 0 ? _bcPrice / USD_TO_LBP : 0;
+    var priceEl  = document.getElementById('labelPrice');
+    var svgEl    = document.getElementById('barcodesvg');
+
+    document.getElementById('labelProductName').textContent = _bcProduct;
+
+    if (type === 'usd') {
+        // USD only — show price, hide barcode
+        priceEl.textContent = '$ ' + usd.toFixed(2);
+        priceEl.style.cssText = 'display:block;font-size:22px;font-weight:900;color:#16a34a;margin-top:8px;';
+        svgEl.style.display = 'none';
+    } else if (type === 'barcode') {
+        // Barcode only — show barcode, hide price completely
+        priceEl.textContent = '';
+        priceEl.style.cssText = 'display:none;';
+        svgEl.style.display = '';
+        JsBarcode('#barcodesvg', _bcBarcode, { format:'CODE128', width:2, height:50, displayValue:true, fontSize:12, margin:4 });
+    } else {
+        // Standard LL — show both
+        priceEl.textContent = 'LL ' + Math.round(_bcPrice).toLocaleString();
+        priceEl.style.cssText = 'display:block;font-size:14px;font-weight:800;color:#1976D2;margin-top:8px;';
+        svgEl.style.display = '';
+        JsBarcode('#barcodesvg', _bcBarcode, { format:'CODE128', width:2, height:50, displayValue:true, fontSize:12, margin:4 });
+    }
+}
+
+function closeBarcodeModal() { document.getElementById('barcodeModal').style.display = 'none'; }
+
+function getLabelCSS(dims) {
+    return '* { margin:0; padding:0; box-sizing:border-box; }' +
+        'body { font-family:Arial,sans-serif; background:white; }' +
+        '.labels { display:flex; flex-wrap:wrap; gap:4mm; padding:5mm; }' +
+        '.label { width:' + dims.w + '; height:' + dims.h + '; border:1px dashed #ccc;' +
+            'display:flex; flex-direction:column; align-items:center; justify-content:center;' +
+            'padding:3mm; page-break-inside:avoid; text-align:center; }' +
+        '.lname { font-weight:bold; line-height:1.3; max-width:100%; word-break:break-word; font-size:' + dims.nameSize + '; }' +
+        '.lprice { font-weight:900; margin-top:2mm; }' +
+        '.lprice-usd { color:#16a34a; font-size:' + dims.priceUsdSize + '; }' +
+        '.lprice-lbp { color:#1976D2; font-size:' + dims.priceSize + '; }' +
+        'svg { max-width:100%; margin:1mm 0; }' +
+        '@media print { body{margin:0;} .labels{gap:2mm;padding:3mm;} }';
+}
+
+function buildSvg(barcode, dims) {
+    var t = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    t.id = '_psvg_' + Math.random().toString(36).slice(2);
+    document.body.appendChild(t);
+    JsBarcode('#' + t.id, barcode, { format:'CODE128', width:dims.bcWidth, height:dims.bcHeight, displayValue:true, fontSize:9, margin:3 });
+    var s = t.outerHTML;
+    document.body.removeChild(t);
+    return s;
 }
 
 function doPrintLabel() {
     var copies = parseInt(document.getElementById('labelCopies').value) || 1;
     var size   = document.getElementById('labelSize').value;
+    var type   = document.getElementById('labelType').value;
+    var usd    = USD_TO_LBP > 0 ? _bcPrice / USD_TO_LBP : 0;
+    var dims   = getDims(size);
+    var label  = buildOneLabel(_bcProduct, _bcBarcode, _bcPrice, usd, type, dims);
+    var all = ''; for (var i = 0; i < copies; i++) all += label;
+    openPrintWin(getLabelCSS(dims), all, type === 'usd' ? 'USD Shelf Labels' : 'Barcode Labels');
+}
 
-    var dims = {
-        small:  { w:'50mm',  h:'25mm', nameSize:'9px',  priceSize:'10px', bcWidth:1.5, bcHeight:30 },
-        medium: { w:'70mm',  h:'35mm', nameSize:'11px', priceSize:'12px', bcWidth:2,   bcHeight:40 },
-        large:  { w:'100mm', h:'50mm', nameSize:'14px', priceSize:'15px', bcWidth:2.5, bcHeight:55 },
-    }[size];
+function getDims(size) {
+    return {
+        small:  { w:'50mm',  h:'25mm', nameSize:'8px',  priceSize:'9px',  priceUsdSize:'14px', bcWidth:1.2, bcHeight:28 },
+        medium: { w:'70mm',  h:'35mm', nameSize:'10px', priceSize:'11px', priceUsdSize:'18px', bcWidth:1.8, bcHeight:38 },
+        large:  { w:'100mm', h:'50mm', nameSize:'13px', priceSize:'14px', priceUsdSize:'24px', bcWidth:2.4, bcHeight:52 },
+    }[size] || { w:'70mm', h:'35mm', nameSize:'10px', priceSize:'11px', priceUsdSize:'18px', bcWidth:1.8, bcHeight:38 };
+}
 
-    // Build SVG barcode for print
-    var tempSvg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-    tempSvg.id = '_printsvg';
-    document.body.appendChild(tempSvg);
-    JsBarcode('#_printsvg', _bcBarcode, {
-        format:'CODE128', width:dims.bcWidth, height:dims.bcHeight,
-        displayValue:true, fontSize:10, margin:3,
-    });
-    var svgContent = tempSvg.outerHTML;
-    document.body.removeChild(tempSvg);
+function buildOneLabel(name, barcode, priceLbp, priceUsd, type, dims) {
+    var svgStr = (type !== 'usd' && barcode) ? buildSvg(barcode, dims) : '';
+    var priceHtml = '';
+    if (type === 'usd')     priceHtml = '<div class="lprice lprice-usd">$ ' + parseFloat(priceUsd).toFixed(2) + '</div>';
+    if (type === 'lbp')     priceHtml = '<div class="lprice lprice-lbp">LL ' + Math.round(priceLbp).toLocaleString() + '</div>';
+    return '<div class="label"><div class="lname">' + escH(name) + '</div>' + svgStr + priceHtml + '</div>';
+}
 
-    // Build one label HTML
-    var label = '<div class="label">' +
-        '<div class="lname">' + escH(_bcProduct) + '</div>' +
-        svgContent +
-        '<div class="lprice">LL ' + Math.round(_bcPrice).toLocaleString() + '</div>' +
-        '</div>';
-
-    var allLabels = '';
-    for (var i = 0; i < copies; i++) allLabels += label;
-
-    var win = window.open('', '_blank', 'width=600,height=500');
-    win.document.write('<!DOCTYPE html><html><head><title>Barcode Labels</title><style>' +
-        '* { margin:0; padding:0; box-sizing:border-box; }' +
-        'body { font-family: Arial, sans-serif; background: white; }' +
-        '.labels { display:flex; flex-wrap:wrap; gap:4mm; padding:5mm; }' +
-        '.label { width:' + dims.w + '; height:' + dims.h + '; border:1px dashed #ccc;' +
-            'display:flex; flex-direction:column; align-items:center; justify-content:center;' +
-            'padding:2mm; page-break-inside:avoid; }' +
-        '.lname { font-size:' + dims.nameSize + '; font-weight:bold; text-align:center;' +
-            'line-height:1.2; margin-bottom:1mm; max-width:100%; overflow:hidden; }' +
-        '.lprice { font-size:' + dims.priceSize + '; font-weight:bold; color:#1976D2; margin-top:1mm; }' +
-        'svg { max-width:100%; }' +
-        '@media print { body { margin:0; } .labels { gap:2mm; padding:3mm; } }' +
-        '</style></head><body>' +
-        '<div class="labels">' + allLabels + '</div>' +
-        '<script>window.onload=function(){window.print();}<\/script>' +
-        '</body></html>');
+function openPrintWin(css, labelsHtml, title) {
+    var win = window.open('', '_blank', 'width=650,height=500');
+    win.document.write('<!DOCTYPE html><html><head><title>' + title + '</title><style>' + css +
+        '</style></head><body><div class="labels">' + labelsHtml +
+        '</div><script>window.onload=function(){window.print();}<\/script></body></html>');
     win.document.close();
 }
 
@@ -981,10 +1031,144 @@ function escH(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Close modal on backdrop click
-document.getElementById('barcodeModal').addEventListener('click', function(e) {
-    if (e.target === this) closeBarcodeModal();
+// ── Bulk USD Shelf Label Print ─────────────────────────────────────────────
+var ALL_PRODUCTS = <?= json_encode(array_values($all_for_bulk)) ?>;
+
+function openBulkModal() {
+    renderBulkList(ALL_PRODUCTS);
+    document.getElementById('bulkSearchInput').value = '';
+    document.getElementById('bulkModal').style.display = 'flex';
+}
+
+function closeBulkModal() { document.getElementById('bulkModal').style.display = 'none'; }
+
+function renderBulkList(products) {
+    var html = '';
+    products.forEach(function(p) {
+        var usd = USD_TO_LBP > 0 ? (parseFloat(p.price) / USD_TO_LBP).toFixed(2) : '0.00';
+        html += '<label class="bulk-row">' +
+            '<input type="checkbox" class="bulk-chk" value="' + p.codep + '" ' +
+            'data-name="' + escH(p.nomp) + '" data-price="' + p.price + '" data-usd="' + usd + '" data-barcode="' + escH(p.barcode||'') + '">' +
+            '<span class="bulk-name">' + escH(p.nomp) + '</span>' +
+            '<span class="bulk-cat">' + escH(p.category||'') + '</span>' +
+            '<span class="bulk-price">$ ' + usd + '</span>' +
+            '</label>';
+    });
+    document.getElementById('bulkList').innerHTML = html || '<div style="text-align:center;color:#9ca3af;padding:20px;">No products found</div>';
+}
+
+document.addEventListener('input', function(e) {
+    if (e.target.id === 'bulkSearchInput') {
+        var q = e.target.value.toLowerCase();
+        renderBulkList(ALL_PRODUCTS.filter(function(p) {
+            return p.nomp.toLowerCase().includes(q) || (p.category||'').toLowerCase().includes(q);
+        }));
+    }
 });
+
+function bulkSelectAll(checked) {
+    document.querySelectorAll('.bulk-chk').forEach(function(c) { c.checked = checked; });
+    updateBulkCount();
+}
+
+function updateBulkCount() {
+    var n = document.querySelectorAll('.bulk-chk:checked').length;
+    document.getElementById('bulkCount').textContent = n + ' selected';
+}
+
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('bulk-chk')) updateBulkCount();
+});
+
+function doBulkPrint() {
+    var checked = document.querySelectorAll('.bulk-chk:checked');
+    if (!checked.length) { alert('Select at least one product.'); return; }
+    var size = document.getElementById('bulkSize').value;
+    var dims = getDims(size);
+    var css  = getLabelCSS(dims);
+    var all  = '';
+    checked.forEach(function(c) {
+        var usd = parseFloat(c.dataset.usd) || 0;
+        all += buildOneLabel(c.dataset.name, c.dataset.barcode, parseFloat(c.dataset.price), usd, 'usd', dims);
+    });
+    openPrintWin(css, all, 'USD Shelf Labels');
+}
+
+document.getElementById('barcodeModal').addEventListener('click', function(e) { if (e.target === this) closeBarcodeModal(); });
+document.getElementById('bulkModal').addEventListener('click', function(e) { if (e.target === this) closeBulkModal(); });
+
+
 </script>
+
+<!-- Bulk USD Shelf Label Modal -->
+<div id="bulkModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:16px;width:600px;max-width:95vw;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+        <div style="padding:20px 24px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
+            <h3 style="font-size:16px;font-weight:800;color:#1a1a2e;display:flex;align-items:center;gap:8px;">
+                <i class="fas fa-tags" style="color:#16a34a;"></i> Bulk USD Shelf Labels
+            </h3>
+            <button onclick="closeBulkModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;">×</button>
+        </div>
+        <div style="padding:14px 24px;border-bottom:1px solid #f0f2f5;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <input type="text" id="bulkSearchInput" placeholder="Search products..."
+                style="flex:1;min-width:160px;padding:7px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;">
+            <button onclick="bulkSelectAll(true)" style="padding:7px 14px;background:#eff6ff;color:#1976D2;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Select All</button>
+            <button onclick="bulkSelectAll(false)" style="padding:7px 14px;background:#f3f4f6;color:#6b7280;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Clear</button>
+            <label style="font-size:12px;font-weight:700;color:#6b7280;">Size:</label>
+            <select id="bulkSize" style="padding:7px 10px;border:2px solid #e5e7eb;border-radius:8px;font-size:12px;">
+                <option value="small">Small (50×25mm)</option>
+                <option value="medium" selected>Medium (70×35mm)</option>
+                <option value="large">Large (100×50mm)</option>
+            </select>
+            <span id="bulkCount" style="font-size:12px;font-weight:700;color:#16a34a;min-width:70px;">0 selected</span>
+        </div>
+        <div id="bulkList" style="overflow-y:auto;flex:1;padding:8px 12px;"></div>
+        <div style="padding:16px 24px;border-top:1px solid #e5e7eb;display:flex;gap:10px;">
+            <button onclick="doBulkPrint()" style="flex:1;background:#16a34a;color:white;border:none;padding:12px;border-radius:9px;font-weight:800;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+                <i class="fas fa-print"></i> Print USD Shelf Labels
+            </button>
+            <button onclick="closeBulkModal()" style="background:#f3f4f6;color:#374151;border:none;padding:12px 20px;border-radius:9px;font-weight:600;font-size:13px;cursor:pointer;">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Barcode Label Modal -->
+<div id="bulkBarcodeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:16px;width:620px;max-width:95vw;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+        <div style="padding:20px 24px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
+            <h3 style="font-size:16px;font-weight:800;color:#1a1a2e;display:flex;align-items:center;gap:8px;">
+                <i class="fas fa-barcode" style="color:#7c3aed;"></i> Bulk Barcode Labels
+            </h3>
+            <button onclick="closeBulkBarcodeModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280;">×</button>
+        </div>
+        <div style="padding:14px 24px;border-bottom:1px solid #f0f2f5;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <input type="text" id="bulkBarcodeSearchInput" placeholder="Search products..."
+                style="flex:1;min-width:160px;padding:7px 12px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;">
+            <button onclick="bulkBarcodeSelectAll(true)" style="padding:7px 14px;background:#f5f3ff;color:#7c3aed;border:1px solid #ddd6fe;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Select All</button>
+            <button onclick="bulkBarcodeSelectAll(false)" style="padding:7px 14px;background:#f3f4f6;color:#6b7280;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Clear</button>
+            <label style="font-size:12px;font-weight:700;color:#6b7280;">Size:</label>
+            <select id="bulkBarcodeSize" style="padding:7px 10px;border:2px solid #e5e7eb;border-radius:8px;font-size:12px;">
+                <option value="small">Small (50×25mm)</option>
+                <option value="medium" selected>Medium (70×35mm)</option>
+                <option value="large">Large (100×50mm)</option>
+            </select>
+            <label style="font-size:12px;font-weight:700;color:#6b7280;">Copies each:</label>
+            <input type="number" id="bulkBarcodeCopies" value="1" min="1" max="500"
+                style="width:60px;padding:7px 8px;border:2px solid #e5e7eb;border-radius:8px;font-size:13px;font-weight:700;text-align:center;">
+            <span id="bulkBarcodeCount" style="font-size:12px;font-weight:700;color:#7c3aed;min-width:70px;">0 selected</span>
+        </div>
+        <div style="padding:8px 24px;background:#f5f3ff;border-bottom:1px solid #ede9fe;font-size:11px;color:#7c3aed;font-weight:600;">
+            <i class="fas fa-info-circle"></i> Products without a barcode are grayed out and cannot be selected. Assign a barcode first in the product edit.
+        </div>
+        <div id="bulkBarcodeList" style="overflow-y:auto;flex:1;padding:8px 12px;"></div>
+        <div style="padding:16px 24px;border-top:1px solid #e5e7eb;display:flex;gap:10px;">
+            <button onclick="doBulkBarcodePrint()" style="flex:1;background:#7c3aed;color:white;border:none;padding:12px;border-radius:9px;font-weight:800;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+                <i class="fas fa-print"></i> Print Barcode Labels
+            </button>
+            <button onclick="closeBulkBarcodeModal()" style="background:#f3f4f6;color:#374151;border:none;padding:12px 20px;border-radius:9px;font-weight:600;font-size:13px;cursor:pointer;">Cancel</button>
+        </div>
+    </div>
+</div>
+
 </body>
 </html>
