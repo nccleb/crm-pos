@@ -25,16 +25,17 @@ mysqli_close($conn);
 $vat_rate   = isset($co['vat_rate'])   && $co['vat_rate']   !== null ? (float)$co['vat_rate']   : 0;
 $usd_to_lbp = isset($co['usd_to_lbp']) && $co['usd_to_lbp'] !== null ? (float)$co['usd_to_lbp'] : 89500;
 
-// All amounts stored in LBP directly
-$gross_lbp   = (float)$sale['total'];
-$sub_lbp     = (float)$sale['final_total'];
+// All amounts stored in USD in DB — convert to LBP for display
+$gross_lbp   = (float)$sale['total'] * $usd_to_lbp;
+$sub_lbp     = (float)$sale['final_total'] * $usd_to_lbp;
+$disc_lbp    = (float)$sale['discount'] * $usd_to_lbp;
+$has_discount = $sale['discount'] > 0;
+
 $vat_lbp     = $vat_rate > 0 ? round($sub_lbp * ($vat_rate / 100)) : 0;
 $exact_lbp   = round($sub_lbp + $vat_lbp);
 $note        = 5000;
 $due_lbp     = round($exact_lbp / $note) * $note;
 $rounding    = $due_lbp - $exact_lbp;
-$disc_lbp    = (float)$sale['discount'];
-$has_discount = $sale['discount'] > 0;
 // USD equivalent for display only
 $total_with_vat = $usd_to_lbp > 0 ? $exact_lbp / $usd_to_lbp : 0;
 
@@ -165,8 +166,8 @@ body {
     </thead>
     <tbody>
     <?php foreach ($items as $item):
-        $unit_lbp = round((float)$item['unit_price']);
-        $item_lbp = round((float)$item['subtotal']);
+        $unit_lbp = round((float)$item['unit_price'] * $usd_to_lbp);
+        $item_lbp = round((float)$item['subtotal']   * $usd_to_lbp);
         // Show weight for weighted items
         $qty_display = (float)$item['qty'];
         $qty_str = ($qty_display != intval($qty_display))
