@@ -277,6 +277,10 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
 .btn-print:hover { background:#0D47A1; }
 .btn-new-sale { flex:1; padding:12px; background:#10b981; color:white; border:none; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
 .btn-new-sale:hover { background:#059669; }
+/* Disable mouse wheel scroll changing number input values */
+input[type=number] { -moz-appearance: textfield; }
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 </style>
 </head>
 <body>
@@ -286,8 +290,6 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
     <i class="fas fa-cash-register fa-lg"></i>
     <h1>Point of Sale</h1>
     <div class="agent"><i class="fas fa-user"></i> <?= htmlspecialchars($agent_name) ?></div>
-
-    <?php if ($agent_name === 'super'): ?>
     <a href="pos_sales.php"><i class="fas fa-history"></i> Sales History</a>
     <a href="pos_products.php"><i class="fas fa-box"></i> Products</a>
     <a href="pos_stock.php"><i class="fas fa-boxes"></i> Stock</a>
@@ -295,18 +297,13 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
     <a href="pos_suppliers.php"><i class="fas fa-building"></i> Suppliers</a>
     <a href="pos_reorder.php"><i class="fas fa-truck-loading"></i> Reorder</a>
     <a href="pos_expiry_alerts.php"><i class="fas fa-bell"></i> Expiry Alerts</a>
-    <a href="pos_bundles.php"><i class="fas fa-layer-group"></i> Bundles</a>
-    <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
-    <a href="pos_expiry.php"><i class="fas fa-calendar-times"></i> Expiry</a>
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
-    <a href="pos_reports.php"><i class="fas fa-chart-bar"></i> Reports</a>
-    <a href="pos_closing.php"><i class="fas fa-balance-scale"></i> Closing</a>
-    <a href="pos_activity.php"><i class="fas fa-clipboard-list"></i> Activity</a>
+    <?php if ($agent_name === 'super'): ?>
     <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
-    <?php else: ?>
-    <a href="pos_sales.php"><i class="fas fa-history"></i> My Sales</a>
+    <a href="pos_activity.php"><i class="fas fa-history"></i> Activity</a>
+    
+    <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
     <?php endif; ?>
-
     <a href="test204.php?page=<?= urlencode($agent_name) ?>&page1=<?= $agent_id ?>"><i class="fas fa-arrow-left"></i> Back to CRM</a>
 </div>
 
@@ -396,7 +393,7 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
 
 <!-- Checkout Modal — Dual Currency Payment -->
 <div class="checkout-overlay" id="checkoutOverlay" onclick="closeCheckout(event)">
-    <div class="checkout-sheet">
+    <div class="checkout-sheet" id="checkoutSheet">
         <div class="checkout-handle"></div>
         <div class="checkout-title"><i class="fas fa-cash-register" style="color:#1976D2;"></i> Payment</div>
 
@@ -417,7 +414,7 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
             <span class="pay-section-label"><i class="fas fa-tag"></i> Discount (LL)</span>
             <div class="discount-input-wrap">
                 <span>LL</span>
-                <input type="number" id="discountInput" value="0" min="0" step="1000" oninput="updateTotals()" placeholder="0">
+                <input type="number" id="discountInput" value="0" min="0" step="1000" oninput="updateTotals()" placeholder="0" onwheel="event.preventDefault()">
             </div>
         </div>
 
@@ -441,7 +438,7 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
                 <span class="pay-section-label">LL LBP received</span>
                 <div class="pay-input-row">
                     <span class="sym">LL</span>
-                    <input type="number" id="paidLbp" value="" min="0" step="1000" placeholder="0" oninput="calcChange()">
+                    <input type="number" id="paidLbp" value="" min="0" step="1000" placeholder="0" oninput="calcChange()" onwheel="event.preventDefault()">
                 </div>
                 <div class="denom-row" id="lbpDenomBtns"></div>
                 <div id="lbpSuggestion" style="font-size:11px;color:#1976D2;font-weight:700;margin-top:4px;display:none;"></div>
@@ -452,7 +449,7 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
                 <span class="pay-section-label">$ USD received</span>
                 <div class="pay-input-row">
                     <span class="sym">$</span>
-                    <input type="number" id="paidUsd" value="" min="0" step="1" placeholder="0" oninput="calcChange()">
+                    <input type="number" id="paidUsd" value="" min="0" step="1" placeholder="0" oninput="calcChange()" onwheel="event.preventDefault()">
                 </div>
                 <div class="denom-row" id="usdDenomBtns"></div>
             </div>
@@ -475,13 +472,13 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
                     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#065f46;margin-bottom:6px;">Give back:</div>
                     <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
                         <span style="font-size:12px;font-weight:700;min-width:20px;">$</span>
-                        <input type="number" id="giveBackUsd" min="0" step="1" placeholder="0"
+                        <input type="number" id="giveBackUsd" min="0" step="1" placeholder="0" onwheel="event.preventDefault()"
                             style="flex:1;padding:6px 8px;border:1px solid #6ee7b7;border-radius:6px;font-size:13px;font-weight:700;background:white;"
                             oninput="adjustChangeSplit()">
                     </div>
                     <div style="display:flex;gap:8px;align-items:center;">
                         <span style="font-size:12px;font-weight:700;min-width:20px;">LL</span>
-                        <input type="number" id="giveBackLbp" min="0" step="5000" placeholder="0"
+                        <input type="number" id="giveBackLbp" min="0" step="5000" placeholder="0" onwheel="event.preventDefault()"
                             style="flex:1;padding:6px 8px;border:1px solid #6ee7b7;border-radius:6px;font-size:13px;font-weight:700;background:#f0fdf4;color:#065f46;" readonly>
                     </div>
                     <div id="changeSplitWarning" style="font-size:11px;color:#dc2626;margin-top:5px;display:none;">
@@ -1264,6 +1261,24 @@ function loadClientHistory(clientId) {
         });
 }
 document.addEventListener('click', e => { if (!e.target.closest('.customer-search-wrap')) document.getElementById('customerDropdown').classList.remove('show'); });
+
+// Prevent mouse wheel from scrolling payment modal when focused on a number input
+(function() {
+    function blockWheelOnInputs(e) {
+        var active = document.activeElement;
+        if (active && active.type === 'number') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
+    }
+    // Wait for DOM then attach to the checkout sheet container
+    var sheet = document.getElementById('checkoutSheet');
+    if (sheet) {
+        sheet.addEventListener('wheel', blockWheelOnInputs, { passive: false });
+    }
+    // Also attach to document as fallback
+    document.addEventListener('wheel', blockWheelOnInputs, { passive: false });
+})();
 
 // ── Settings passed from PHP ──────────────────────────────────────────────
 var USD_TO_LBP = <?= json_encode((float)($pos_settings['usd_to_lbp'] ?? 89500)) ?>;
