@@ -65,7 +65,7 @@ logMsg('=== Expiry Alert Cron Started ===');
 rotateLog();
 
 // ── DB connection ──────────────────────────────────────────────────────────
-$conn = mysqli_connect("192.168.1.19", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("192.168.1.14", "root", "1Sys9Admeen72", "nccleb_test");
 if (!$conn) {
     logMsg('ERROR: DB connection failed — ' . mysqli_connect_error());
     exit(1);
@@ -118,15 +118,11 @@ $res = mysqli_query($conn, "
         p.nomp AS product_name,
         p.price,
         p.category,
+        p.onhand,
         sri.expiry_date,
         sri.qty_received,
         sri.cost_price_lbp,
         DATEDIFF(sri.expiry_date, CURDATE()) AS days_left,
-        (SELECT SUM(si2.qty) FROM pos_sale_items si2
-         JOIN pos_sales s2 ON si2.sale_id = s2.id
-         WHERE si2.product_id = sri.product_id AND s2.status='completed'
-         AND s2.created_at >= (SELECT sr2.received_date FROM stock_receivings sr2 WHERE sr2.id = sri.receiving_id)
-        ) AS qty_sold,
         sup.name AS supplier_name
     FROM stock_receiving_items sri
     JOIN stock_receivings sr ON sri.receiving_id = sr.id
@@ -142,8 +138,7 @@ $batches = [];
 while ($r = mysqli_fetch_assoc($res)) {
     $days  = (int)$r['days_left'];
     $disc  = discountForDays($days, $cfg);
-    $sold  = (float)($r['qty_sold'] ?? 0);
-    $remaining = max(0, (float)$r['qty_received'] - $sold);
+    $remaining = (float)$r['onhand'];
     $batches[] = [
         'batch_id'      => $r['batch_id'],
         'product_name'  => $r['product_name'],

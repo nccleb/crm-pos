@@ -584,7 +584,7 @@ if ($has_threshold) {
                 <td>
                     <?php if (!empty($p['earliest_expiry'])): ?>
                         <?php
-                            $today = new DateTime();
+                            $today = new DateTime(date('Y-m-d'));
                             $exp   = new DateTime($p['earliest_expiry']);
                             $days  = (int)$today->diff($exp)->format('%r%a');
                             if      ($days < 0)  { $color = '#ef4444'; $label = abs($days).'d ago'; }

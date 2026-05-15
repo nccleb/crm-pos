@@ -203,15 +203,11 @@ function getExpiringBatches($conn, array $cfg, int $within_days = 30): array {
             p.nomp AS product_name,
             p.price,
             p.category,
+            p.onhand,
             sri.expiry_date,
             sri.qty_received,
             sri.cost_price_lbp,
             DATEDIFF(sri.expiry_date, CURDATE()) AS days_left,
-            (SELECT SUM(si2.qty) FROM pos_sale_items si2
-             JOIN pos_sales s2 ON si2.sale_id = s2.id
-             WHERE si2.product_id = sri.product_id AND s2.status='completed'
-             AND s2.created_at >= (SELECT sr2.received_date FROM stock_receivings sr2 WHERE sr2.id = sri.receiving_id)
-            ) AS qty_sold,
             sup.name AS supplier_name,
             sr.received_date
         FROM stock_receiving_items sri
@@ -227,8 +223,7 @@ function getExpiringBatches($conn, array $cfg, int $within_days = 30): array {
     while ($r = mysqli_fetch_assoc($res)) {
         $days  = (int)$r['days_left'];
         $disc  = discountForDays($days, $cfg);
-        $sold  = (float)($r['qty_sold'] ?? 0);
-        $remaining = max(0, (float)$r['qty_received'] - $sold);
+        $remaining = (float)$r['onhand']; // use actual stock on hand — already accounts for all sales
         $batches[] = [
             'batch_id'     => $r['batch_id'],
             'product_id'   => $r['product_id'],
