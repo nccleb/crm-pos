@@ -286,6 +286,8 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
     <i class="fas fa-cash-register fa-lg"></i>
     <h1>Point of Sale</h1>
     <div class="agent"><i class="fas fa-user"></i> <?= htmlspecialchars($agent_name) ?></div>
+
+    <?php if ($agent_name === 'super'): ?>
     <a href="pos_sales.php"><i class="fas fa-history"></i> Sales History</a>
     <a href="pos_products.php"><i class="fas fa-box"></i> Products</a>
     <a href="pos_stock.php"><i class="fas fa-boxes"></i> Stock</a>
@@ -293,13 +295,18 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
     <a href="pos_suppliers.php"><i class="fas fa-building"></i> Suppliers</a>
     <a href="pos_reorder.php"><i class="fas fa-truck-loading"></i> Reorder</a>
     <a href="pos_expiry_alerts.php"><i class="fas fa-bell"></i> Expiry Alerts</a>
-    <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
-    <?php if ($agent_name === 'super'): ?>
-    <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
-    <a href="pos_activity.php"><i class="fas fa-history"></i> Activity</a>
-    
+    <a href="pos_bundles.php"><i class="fas fa-layer-group"></i> Bundles</a>
     <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
+    <a href="pos_expiry.php"><i class="fas fa-calendar-times"></i> Expiry</a>
+    <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
+    <a href="pos_reports.php"><i class="fas fa-chart-bar"></i> Reports</a>
+    <a href="pos_closing.php"><i class="fas fa-balance-scale"></i> Closing</a>
+    <a href="pos_activity.php"><i class="fas fa-clipboard-list"></i> Activity</a>
+    <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
+    <?php else: ?>
+    <a href="pos_sales.php"><i class="fas fa-history"></i> My Sales</a>
     <?php endif; ?>
+
     <a href="test204.php?page=<?= urlencode($agent_name) ?>&page1=<?= $agent_id ?>"><i class="fas fa-arrow-left"></i> Back to CRM</a>
 </div>
 

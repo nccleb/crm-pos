@@ -3,6 +3,7 @@ session_start();
 if (empty($_SESSION['oop'])) { header("Location: login200.php"); exit(); }
 $agent_name = $_SESSION['oop'];
 $agent_id   = (int)($_SESSION['ooq'] ?? 0);
+$is_super   = ($agent_name === 'super');
 
 $conn = mysqli_connect("192.168.1.19","root","1Sys9Admeen72","nccleb_test");
 $co = mysqli_fetch_assoc(mysqli_query($conn, "SELECT usd_to_lbp, vat_rate FROM company_settings LIMIT 1"));
@@ -20,6 +21,11 @@ $where = "WHERE DATE(s.created_at) BETWEEN '$from' AND '$to'";
 if ($pay)    $where .= " AND s.payment_method = '$pay'";
 if ($search) $where .= " AND (s.client_name LIKE '%$search%' OR s.id LIKE '%$search%')";
 
+// Non-super users only see their own sales
+if (!$is_super) {
+    $where .= " AND s.agent_id = $agent_id";
+}
+
 $sales = mysqli_query($conn,
     "SELECT s.*, 
      (SELECT COUNT(*) FROM pos_sale_items WHERE sale_id = s.id) as item_count
@@ -29,10 +35,10 @@ $sales = mysqli_query($conn,
 // Summary stats for the period
 $stats = mysqli_fetch_assoc(mysqli_query($conn,
     "SELECT COUNT(*) as total_sales,
-     SUM(final_total) as revenue,
-     SUM(discount) as total_discount,
-     SUM(CASE WHEN payment_method='cash' THEN final_total ELSE 0 END) as cash_total,
-     SUM(CASE WHEN payment_method='credit' THEN final_total ELSE 0 END) as credit_total
+     SUM(final_total * $usd_to_lbp) as revenue,
+     SUM(discount * $usd_to_lbp) as total_discount,
+     SUM(CASE WHEN payment_method='cash' THEN final_total * $usd_to_lbp ELSE 0 END) as cash_total,
+     SUM(CASE WHEN payment_method='credit' THEN final_total * $usd_to_lbp ELSE 0 END) as credit_total
      FROM pos_sales s $where"
 ));
 ?>
@@ -152,7 +158,7 @@ tr:hover td { background:#fafafa; }
                 <tr>
                     <th>Sale #</th><th>Date</th><th>Customer</th>
                     <th>Items</th><th>Payment</th><th>Currency</th>
-                    <th>Discount</th><th>Total</th><th>Cashier</th><th></th>
+                    <th>Discount</th><th>Total</th><?php if ($is_super): ?><th>Cashier</th><?php endif; ?><th></th>
                 </tr>
             </thead>
             <tbody>
@@ -167,8 +173,8 @@ tr:hover td { background:#fafafa; }
                 <td><span class="badge pay-<?= $s['payment_method'] ?>"><?= ucfirst(str_replace('_',' ',$s['payment_method'])) ?></span></td>
                 <td><?= $s['currency'] ?></td>
                 <td><?= $s['discount'] > 0 ? '-LL '.number_format(round($s['discount']),0) : '—' ?></td>
-                <td><strong>LL <?= number_format(round(round((float)$s['final_total'] * (1 + $vat_rate/100) / 5000) * 5000), 0) ?></strong></td>
-                <td><?= htmlspecialchars($s['agent_name']) ?></td>
+                <td><strong>LL <?= number_format(round(round((float)$s['final_total'] * $usd_to_lbp * (1 + $vat_rate/100) / 5000) * 5000), 0) ?></strong></td>
+                <td><?php if ($is_super): ?><?= htmlspecialchars($s['agent_name']) ?><?php endif; ?></td>
                 <td>
                     <button class="btn btn-blue" style="padding:6px 12px;font-size:12px;" onclick="viewSale(<?= $s['id'] ?>)">
                         <i class="fas fa-eye"></i>
@@ -220,21 +226,21 @@ function viewSale(id) {
 
             html += '<table class="items-table"><thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead><tbody>';
             items.forEach(function(item) {
-                var unitLbp    = Math.round(parseFloat(item.unit_price));
-                var subtotalLbp = Math.round(parseFloat(item.subtotal));
+                var unitLbp     = Math.round(parseFloat(item.unit_price) * USD_TO_LBP);
+                var subtotalLbp = Math.round(parseFloat(item.subtotal)   * USD_TO_LBP);
                 html += '<tr><td>' + escHtml(item.product_name) + '</td><td>' + item.qty + '</td>'
                       + '<td>LL ' + unitLbp.toLocaleString() + '</td>'
                       + '<td>LL ' + subtotalLbp.toLocaleString() + '</td></tr>';
             });
             html += '</tbody></table>';
 
-            var grossLbp    = Math.round(parseFloat(s.total));
-            var discountLbp = Math.round(parseFloat(s.discount));
-            var taxBaseLbp  = Math.round(parseFloat(s.final_total));  // post-discount pre-VAT, LBPe-VAT
-            var vatAmt      = Math.round(parseFloat(s.final_total) * (VAT_RATE/100));
-            var exactTotal  = taxBaseLbp + vatAmt;                                  // exact — no auto-rounding
-            var dueLbp      = Math.round(exactTotal / 5000) * 5000;                 // rounded to LL 5,000
-            var rounding    = dueLbp - exactTotal;                                   // +/- diff
+            var grossLbp    = Math.round(parseFloat(s.total)        * USD_TO_LBP);
+            var discountLbp = Math.round(parseFloat(s.discount)     * USD_TO_LBP);
+            var taxBaseLbp  = Math.round(parseFloat(s.final_total)  * USD_TO_LBP);
+            var vatAmt      = Math.round(taxBaseLbp * (VAT_RATE/100));
+            var exactTotal  = taxBaseLbp + vatAmt;
+            var dueLbp      = Math.round(exactTotal / 5000) * 5000;
+            var rounding    = dueLbp - exactTotal;
 
             html += '<div class="detail-row"><span class="lbl">Subtotal</span><span class="val">LL ' + grossLbp.toLocaleString() + '</span></div>';
             if (discountLbp > 0) {
