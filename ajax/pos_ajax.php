@@ -21,8 +21,6 @@ if (!$conn) {
 }
 mysqli_set_charset($conn, 'utf8mb4');
 
-require_once __DIR__ . '/pos_log.php';
-
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
 switch ($action) {
@@ -191,10 +189,6 @@ switch ($action) {
             $drawer_result = openCashDrawer($conn);
         }
 
-        // ── Log activity ───────────────────────────────────────────────────
-        $log_details = "Sale #$sale_id — LL " . number_format(round($final_total * (1 + $vat_rate / 100) * $usd_to_lbp / 5000) * 5000) . " — $payment_method — $client_name";
-        posLog($conn, $agent_id, $agent_name, 'sale_completed', $log_details, $sale_id, 'sale');
-
         echo json_encode([
             'success'       => true,
             'sale_id'       => $sale_id,
@@ -239,83 +233,45 @@ switch ($action) {
              VALUES ($product_id, '$product_name', '$type', $qty_change, $qty_before, $qty_after, '$note', $agent_id, '$agent_name')"
         );
 
-        posLog($conn, $agent_id, $agent_name, 'stock_adjusted',
-            "$type — $product_name — qty $qty_change (before: $qty_before → after: $qty_after)" . ($note ? " — $note" : ''),
-            $product_id, 'product');
-
         echo json_encode(['success'=>true, 'qty_before'=>$qty_before, 'qty_after'=>$qty_after]);
         break;
 
 
-    // ── Decode scale label barcode (EAN-13 prefix 2) ──────────────────────
-    case 'decode_scale_barcode':
-        $raw = trim($_GET['barcode'] ?? '');
+    // ── Process refund ─────────────────────────────────────────────────────
+    case 'process_refund':
+        $sale_id = (int)($_POST['sale_id'] ?? 0);
+        if (!$sale_id) { echo json_encode(['success'=>false,'error'=>'No sale ID']); break; }
 
-        // Validate: must be 13 digits starting with 2
-        if (!preg_match('/^2\d{12}$/', $raw)) {
-            echo json_encode(['success' => false, 'error' => 'Not a scale barcode']);
-            break;
+        // Get sale — must be completed
+        $sale = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM pos_sales WHERE id=$sale_id LIMIT 1"));
+        if (!$sale) { echo json_encode(['success'=>false,'error'=>'Sale not found']); break; }
+        if ($sale['status'] === 'refunded') { echo json_encode(['success'=>false,'error'=>'Already refunded']); break; }
+
+        // Restore stock for each item
+        $items_res = mysqli_query($conn, "SELECT * FROM pos_sale_items WHERE sale_id=$sale_id");
+        while ($item = mysqli_fetch_assoc($items_res)) {
+            $product_id   = (int)$item['product_id'];
+            $qty          = (float)$item['qty'];
+            $product_name = mysqli_real_escape_string($conn, $item['product_name']);
+
+            $stock = mysqli_fetch_assoc(mysqli_query($conn, "SELECT onhand FROM produit WHERE codep=$product_id LIMIT 1"));
+            $qty_before = (float)($stock['onhand'] ?? 0);
+            $qty_after  = $qty_before + $qty;
+
+            mysqli_query($conn, "UPDATE produit SET onhand=$qty_after WHERE codep=$product_id");
+            mysqli_query($conn, "INSERT INTO stock_movements
+                (product_id, product_name, type, qty_change, qty_before, qty_after, reference_id, note, agent_id, agent_name)
+                VALUES ($product_id, '$product_name', 'return', $qty, $qty_before, $qty_after, $sale_id, 'Refund of Sale #$sale_id', $agent_id, '$agent_name')");
         }
 
-        // EAN-13 prefix-2 structure:
-        //  2 [PPPPP] [WWWWW] [C]
-        //  pos 0     = prefix "2"
-        //  pos 1–5   = PLU (5 digits) — maps to product codep or barcode
-        //  pos 6–10  = weight in grams (5 digits) OR price
-        //  pos 12    = check digit (ignored here)
+        // Flip sale status to refunded
+        mysqli_query($conn, "UPDATE pos_sales SET status='refunded' WHERE id=$sale_id");
 
-        $plu_str    = substr($raw, 1, 5);           // e.g. "00042"
-        $value_str  = substr($raw, 6, 5);           // e.g. "01250"
-        $plu_int    = (int)$plu_str;                // 42
-        $weight_kg  = (int)$value_str / 1000;       // 1.250 kg
+        // Log activity
+        require_once dirname(__FILE__) . '/pos_log.php';
+        posLog($conn, $agent_id, $agent_name, 'sale_refunded', "Refund of Sale #$sale_id", $sale_id, 'sale');
 
-        // Look up product — first by codep, then by barcode field
-        $product = null;
-
-        $res = mysqli_query($conn, "SELECT codep, nomp, price, unit, category, onhand, barcode, is_weighted
-            FROM produit WHERE codep = $plu_int AND active = 1 LIMIT 1");
-        if ($res) $product = mysqli_fetch_assoc($res);
-
-        if (!$product) {
-            // Try matching the 5-digit PLU string against the barcode field
-            $plu_esc = mysqli_real_escape_string($conn, $plu_str);
-            $res2 = mysqli_query($conn, "SELECT codep, nomp, price, unit, category, onhand, barcode, is_weighted
-                FROM produit WHERE barcode LIKE '%$plu_esc%' AND active = 1 LIMIT 1");
-            if ($res2) $product = mysqli_fetch_assoc($res2);
-        }
-
-        if (!$product) {
-            echo json_encode([
-                'success' => false,
-                'error'   => "Product not found for PLU $plu_int",
-                'plu'     => $plu_int,
-                'weight'  => $weight_kg
-            ]);
-            break;
-        }
-
-        // Get company exchange rate
-        $co = mysqli_fetch_assoc(mysqli_query($conn, "SELECT usd_to_lbp FROM company_settings LIMIT 1"));
-        $usd_to_lbp = (float)($co['usd_to_lbp'] ?? 89500);
-
-        // Price stored in LBP directly (v4.0+)
-        $price_per_kg_lbp = (float)$product['price'];
-        $line_total_lbp   = round($price_per_kg_lbp * $weight_kg / 5000) * 5000;
-
-        echo json_encode([
-            'success'          => true,
-            'scale_label'      => true,
-            'plu'              => $plu_int,
-            'weight_kg'        => $weight_kg,
-            'product_id'       => (int)$product['codep'],
-            'product_name'     => $product['nomp'],
-            'price_per_kg_lbp' => $price_per_kg_lbp,
-            'line_total_lbp'   => $line_total_lbp,
-            'unit'             => $product['unit'] ?: 'kg',
-            'category'         => $product['category'] ?: '',
-            'onhand'           => (float)$product['onhand'],
-            'barcode_raw'      => $raw,
-        ]);
+        echo json_encode(['success'=>true, 'sale_id'=>$sale_id]);
         break;
 
     default:

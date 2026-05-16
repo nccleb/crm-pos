@@ -158,14 +158,14 @@ tr:hover td { background:#fafafa; }
                 <tr>
                     <th>Sale #</th><th>Date</th><th>Customer</th>
                     <th>Items</th><th>Payment</th><th>Currency</th>
-                    <th>Discount</th><th>Total</th><?php if ($is_super): ?><th>Cashier</th><?php endif; ?><th></th>
+                    <th>Discount</th><th>Total</th><th>Status</th><?php if ($is_super): ?><th>Cashier</th><?php endif; ?><th></th>
                 </tr>
             </thead>
             <tbody>
             <?php if (mysqli_num_rows($sales) === 0): ?>
             <tr><td colspan="10" style="text-align:center;padding:40px;color:#9ca3af;">No sales found for this period.</td></tr>
             <?php else: while ($s = mysqli_fetch_assoc($sales)): ?>
-            <tr>
+            <tr style="<?= $s['status'] === 'refunded' ? 'opacity:.55;' : '' ?>">
                 <td><strong>#<?= $s['id'] ?></strong></td>
                 <td><?= date('d M Y H:i', strtotime($s['created_at'])) ?></td>
                 <td><?= htmlspecialchars($s['client_name']) ?></td>
@@ -174,6 +174,13 @@ tr:hover td { background:#fafafa; }
                 <td><?= $s['currency'] ?></td>
                 <td><?= $s['discount'] > 0 ? '-LL '.number_format(round($s['discount']),0) : '—' ?></td>
                 <td><strong>LL <?= number_format(round(round((float)$s['final_total'] * $usd_to_lbp * (1 + $vat_rate/100) / 5000) * 5000), 0) ?></strong></td>
+                <td>
+                    <?php if ($s['status'] === 'refunded'): ?>
+                    <span style="background:#fee2e2;color:#dc2626;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">Refunded</span>
+                    <?php else: ?>
+                    <span style="background:#dcfce7;color:#16a34a;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">Completed</span>
+                    <?php endif; ?>
+                </td>
                 <td><?php if ($is_super): ?><?= htmlspecialchars($s['agent_name']) ?><?php endif; ?></td>
                 <td>
                     <button class="btn btn-blue" style="padding:6px 12px;font-size:12px;" onclick="viewSale(<?= $s['id'] ?>)">
@@ -202,6 +209,7 @@ tr:hover td { background:#fafafa; }
 </div>
 
 <script>
+var IS_SUPER   = <?= ($agent_name === 'super') ? 'true' : 'false' ?>;
 var USD_TO_LBP = <?= $usd_to_lbp ?>;
 var VAT_RATE   = <?= $vat_rate ?>;
 
@@ -275,7 +283,14 @@ function viewSale(id) {
                 }
             }
 
-            html += '<div style="margin-top:16px;text-align:center;"><a href="pos_print.php?id=' + s.id + '" target="_blank" class="btn btn-blue"><i class="fas fa-print"></i> Print Receipt</a></div>';
+            html += '<div style="margin-top:16px;display:flex;gap:10px;align-items:center;justify-content:center;">';
+            html += '<a href="pos_print.php?id=' + s.id + '" target="_blank" class="btn btn-blue"><i class="fas fa-print"></i> Print Receipt</a>';
+            if (s.status === 'refunded') {
+                html += '<span style="background:#fee2e2;color:#dc2626;border:2px solid #fca5a5;border-radius:8px;padding:8px 18px;font-weight:800;font-size:13px;">REFUNDED</span>';
+            } else if (s.status === 'completed' && IS_SUPER) {
+                html += '<button onclick="doRefund(' + s.id + ')" style="background:#ef4444;color:white;border:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;"><i class="fas fa-undo"></i> Refund</button>';
+            }
+            html += '</div>';
 
             document.getElementById('saleModalBody').innerHTML = html;
         });
@@ -290,6 +305,19 @@ document.getElementById('saleModal').addEventListener('click', function(e) {
 
 function escHtml(str) {
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function doRefund(saleId) {
+    if (!confirm('Refund Sale #' + saleId + '?\nThis will restore stock and cannot be undone.')) return;
+    var fd = new FormData();
+    fd.append('action', 'process_refund');
+    fd.append('sale_id', saleId);
+    fetch('ajax/pos_ajax.php', {method:'POST', body:fd})
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) { alert('Sale #' + saleId + ' refunded successfully.'); location.reload(); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        });
 }
 </script>
 </body>

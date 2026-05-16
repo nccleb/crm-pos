@@ -65,7 +65,7 @@ logMsg('=== Expiry Alert Cron Started ===');
 rotateLog();
 
 // ── DB connection ──────────────────────────────────────────────────────────
-$conn = mysqli_connect("192.168.1.14", "root", "1Sys9Admeen72", "nccleb_test");
+$conn = mysqli_connect("192.168.1.19", "root", "1Sys9Admeen72", "nccleb_test");
 if (!$conn) {
     logMsg('ERROR: DB connection failed — ' . mysqli_connect_error());
     exit(1);
