@@ -210,8 +210,10 @@ tr:hover td { background:#fafafa; }
 
 <script>
 var IS_SUPER   = <?= ($agent_name === 'super') ? 'true' : 'false' ?>;
+var AGENT_ID   = <?= $agent_id ?>;
 var USD_TO_LBP = <?= $usd_to_lbp ?>;
 var VAT_RATE   = <?= $vat_rate ?>;
+var VOID_MINS  = 30; // cashier can void own sales within this window
 
 function viewSale(id) {
     document.getElementById('saleModal').classList.add('show');
@@ -287,8 +289,19 @@ function viewSale(id) {
             html += '<a href="pos_print.php?id=' + s.id + '" target="_blank" class="btn btn-blue"><i class="fas fa-print"></i> Print Receipt</a>';
             if (s.status === 'refunded') {
                 html += '<span style="background:#fee2e2;color:#dc2626;border:2px solid #fca5a5;border-radius:8px;padding:8px 18px;font-weight:800;font-size:13px;">REFUNDED</span>';
-            } else if (s.status === 'completed' && IS_SUPER) {
-                html += '<button onclick="doRefund(' + s.id + ')" style="background:#ef4444;color:white;border:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;"><i class="fas fa-undo"></i> Refund</button>';
+            } else if (s.status === 'completed') {
+                // Check if cashier can self-void: own sale + within 30 minutes
+                var saleTime   = new Date(s.created_at.replace(' ', 'T'));
+                var minutesAgo = (Date.now() - saleTime.getTime()) / 60000;
+                var ownSale    = parseInt(s.agent_id) === AGENT_ID;
+                var canVoid    = ownSale && minutesAgo <= VOID_MINS;
+
+                if (IS_SUPER) {
+                    html += '<button onclick="doRefund(' + s.id + ',\'Refund\')" style="background:#ef4444;color:white;border:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px;"><i class="fas fa-undo"></i> Refund</button>';
+                } else if (canVoid) {
+                    html += '<button onclick="doRefund(' + s.id + ',\'Void\')" style="background:#f59e0b;color:white;border:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px;"><i class="fas fa-times-circle"></i> Void Sale</button>';
+                    html += '<span style="font-size:11px;color:#9ca3af;margin-left:4px;">' + Math.round(VOID_MINS - minutesAgo) + ' min left</span>';
+                }
             }
             html += '</div>';
 
@@ -307,15 +320,19 @@ function escHtml(str) {
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function doRefund(saleId) {
-    if (!confirm('Refund Sale #' + saleId + '?\nThis will restore stock and cannot be undone.')) return;
+function doRefund(saleId, type) {
+    type = type || 'Refund';
+    var msg = type === 'Void'
+        ? 'Void Sale #' + saleId + '?\nThis will restore stock and remove the sale from revenue.\nUse this to fix a mistake you just made.'
+        : 'Refund Sale #' + saleId + '?\nThis will restore stock and cannot be undone.';
+    if (!confirm(msg)) return;
     var fd = new FormData();
     fd.append('action', 'process_refund');
     fd.append('sale_id', saleId);
     fetch('ajax/pos_ajax.php', {method:'POST', body:fd})
         .then(r => r.json())
         .then(d => {
-            if (d.success) { alert('Sale #' + saleId + ' refunded successfully.'); location.reload(); }
+            if (d.success) { location.reload(); }
             else alert('Error: ' + (d.error || 'Unknown'));
         });
 }

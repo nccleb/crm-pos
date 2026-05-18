@@ -209,6 +209,7 @@ switch ($action) {
         $items_res = mysqli_query($conn, "SELECT * FROM pos_sale_items WHERE sale_id = $sale_id");
         $items = [];
         while ($i = mysqli_fetch_assoc($items_res)) $items[] = $i;
+        // Include agent_id so frontend can check self-void eligibility
         echo json_encode(['success' => true, 'sale' => $sale, 'items' => $items]);
         break;
 
