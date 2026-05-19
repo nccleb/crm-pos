@@ -33,12 +33,16 @@ $sales = mysqli_query($conn,
 );
 
 // Summary stats for the period
+// All amounts now stored natively in LBP.
+// Use the identical rounding formula as the row display:
+//   ROUND(ROUND(final_total * vat_mult / 5000) * 5000)
+$vat_mult = 1 + $vat_rate / 100;
 $stats = mysqli_fetch_assoc(mysqli_query($conn,
     "SELECT COUNT(*) as total_sales,
-     SUM(final_total * $usd_to_lbp) as revenue,
-     SUM(discount * $usd_to_lbp) as total_discount,
-     SUM(CASE WHEN payment_method='cash' THEN final_total * $usd_to_lbp ELSE 0 END) as cash_total,
-     SUM(CASE WHEN payment_method='credit' THEN final_total * $usd_to_lbp ELSE 0 END) as credit_total
+     SUM(ROUND(ROUND(final_total * $vat_mult / 5000) * 5000)) as revenue,
+     SUM(discount) as total_discount,
+     SUM(CASE WHEN payment_method='cash'   THEN ROUND(ROUND(final_total * $vat_mult / 5000) * 5000) ELSE 0 END) as cash_total,
+     SUM(CASE WHEN payment_method='credit' THEN ROUND(ROUND(final_total * $vat_mult / 5000) * 5000) ELSE 0 END) as credit_total
      FROM pos_sales s $where"
 ));
 ?>
@@ -128,10 +132,10 @@ tr:hover td { background:#fafafa; }
 <!-- Stats -->
 <div class="stats">
     <div class="stat"><div class="val"><?= $stats['total_sales'] ?></div><div class="lbl">Total Sales</div></div>
-    <div class="stat green"><div class="val">LL <?= number_format(round(($stats['revenue'] ?? 0) * (1 + $vat_rate/100)), 0) ?></div><div class="lbl">Revenue (incl. VAT)</div></div>
+    <div class="stat green"><div class="val">LL <?= number_format($stats['revenue'] ?? 0, 0) ?></div><div class="lbl">Revenue (incl. VAT)</div></div>
     <div class="stat orange"><div class="val">LL <?= number_format(round($stats['total_discount'] ?? 0), 0) ?></div><div class="lbl">Discounts Given</div></div>
-    <div class="stat"><div class="val">LL <?= number_format(round(($stats['cash_total'] ?? 0) * (1 + $vat_rate/100)), 0) ?></div><div class="lbl">Cash Collected</div></div>
-    <div class="stat red"><div class="val">LL <?= number_format(round(($stats['credit_total'] ?? 0) * (1 + $vat_rate/100)), 0) ?></div><div class="lbl">On Credit</div></div>
+    <div class="stat"><div class="val">LL <?= number_format($stats['cash_total'] ?? 0, 0) ?></div><div class="lbl">Cash Collected</div></div>
+    <div class="stat red"><div class="val">LL <?= number_format($stats['credit_total'] ?? 0, 0) ?></div><div class="lbl">On Credit</div></div>
 </div>
 
 <div class="card">
@@ -173,7 +177,7 @@ tr:hover td { background:#fafafa; }
                 <td><span class="badge pay-<?= $s['payment_method'] ?>"><?= ucfirst(str_replace('_',' ',$s['payment_method'])) ?></span></td>
                 <td><?= $s['currency'] ?></td>
                 <td><?= $s['discount'] > 0 ? '-LL '.number_format(round($s['discount']),0) : '—' ?></td>
-                <td><strong>LL <?= number_format(round(round((float)$s['final_total'] * $usd_to_lbp * (1 + $vat_rate/100) / 5000) * 5000), 0) ?></strong></td>
+                <td><strong>LL <?= number_format(round(round((float)$s['final_total'] * (1 + $vat_rate/100) / 5000) * 5000), 0) ?></strong></td>
                 <td>
                     <?php if ($s['status'] === 'refunded'): ?>
                     <span style="background:#fee2e2;color:#dc2626;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">Refunded</span>
@@ -236,17 +240,17 @@ function viewSale(id) {
 
             html += '<table class="items-table"><thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead><tbody>';
             items.forEach(function(item) {
-                var unitLbp     = Math.round(parseFloat(item.unit_price) * USD_TO_LBP);
-                var subtotalLbp = Math.round(parseFloat(item.subtotal)   * USD_TO_LBP);
+                var unitLbp     = Math.round(parseFloat(item.unit_price));
+                var subtotalLbp = Math.round(parseFloat(item.subtotal));
                 html += '<tr><td>' + escHtml(item.product_name) + '</td><td>' + item.qty + '</td>'
                       + '<td>LL ' + unitLbp.toLocaleString() + '</td>'
                       + '<td>LL ' + subtotalLbp.toLocaleString() + '</td></tr>';
             });
             html += '</tbody></table>';
 
-            var grossLbp    = Math.round(parseFloat(s.total)        * USD_TO_LBP);
-            var discountLbp = Math.round(parseFloat(s.discount)     * USD_TO_LBP);
-            var taxBaseLbp  = Math.round(parseFloat(s.final_total)  * USD_TO_LBP);
+            var grossLbp    = Math.round(parseFloat(s.total));
+            var discountLbp = Math.round(parseFloat(s.discount));
+            var taxBaseLbp  = Math.round(parseFloat(s.final_total));
             var vatAmt      = Math.round(taxBaseLbp * (VAT_RATE/100));
             var exactTotal  = taxBaseLbp + vatAmt;
             var dueLbp      = Math.round(exactTotal / 5000) * 5000;

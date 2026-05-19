@@ -41,13 +41,13 @@ if ($report === 'bestsellers' || $report === 'profit') {
             p.cost_price,
             p.unit,
             SUM(si.qty)                                                         AS qty_sold,
-            SUM(si.subtotal * $usd_to_lbp)                                      AS revenue,
-            SUM(si.subtotal * $vat * $usd_to_lbp)                               AS revenue_vat,
-            SUM(si.qty * p.cost_price * $usd_to_lbp)                            AS total_cost,
-            SUM(si.subtotal * $usd_to_lbp) - SUM(si.qty * p.cost_price * $usd_to_lbp) AS total_profit,
+            SUM(si.subtotal)                                                     AS revenue,
+            SUM(si.subtotal * $vat)                                              AS revenue_vat,
+            SUM(si.qty * p.cost_price)                                           AS total_cost,
+            SUM(si.subtotal) - SUM(si.qty * p.cost_price)                        AS total_profit,
             CASE WHEN SUM(si.subtotal) > 0
                  THEN ROUND((SUM(si.subtotal) - SUM(si.qty * p.cost_price)) / SUM(si.subtotal) * 100, 1)
-                 ELSE 0 END                                                     AS margin_pct
+                 ELSE 0 END                                                      AS margin_pct
          FROM pos_sale_items si
          JOIN pos_sales s ON s.id = si.sale_id
          LEFT JOIN produit p ON p.codep = si.product_id
@@ -68,7 +68,7 @@ if ($report === 'trends') {
     if ($days_range <= 31) {
         // daily
         $trend_res = mysqli_query($conn,
-            "SELECT DATE(created_at) as d, COUNT(*) as cnt, SUM(final_total * $vat * $usd_to_lbp) as rev
+            "SELECT DATE(created_at) as d, COUNT(*) as cnt, SUM(ROUND(ROUND(final_total * $vat / 5000) * 5000)) as rev
              FROM pos_sales
              WHERE DATE(created_at) BETWEEN '$df' AND '$dt' AND status IN ('completed','pending')
              GROUP BY DATE(created_at) ORDER BY d ASC"
@@ -78,7 +78,7 @@ if ($report === 'trends') {
         // weekly
         $trend_res = mysqli_query($conn,
             "SELECT YEARWEEK(created_at,1) as d, MIN(DATE(created_at)) as week_start,
-                    COUNT(*) as cnt, SUM(final_total * $vat * $usd_to_lbp) as rev
+                    COUNT(*) as cnt, SUM(ROUND(ROUND(final_total * $vat / 5000) * 5000)) as rev
              FROM pos_sales
              WHERE DATE(created_at) BETWEEN '$df' AND '$dt' AND status IN ('completed','pending')
              GROUP BY YEARWEEK(created_at,1) ORDER BY d ASC"

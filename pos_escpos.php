@@ -150,8 +150,8 @@ function printEscPos($sale_id, $conn) {
         'credit'        => 'Credit',
     ];
 
-    // ── Financial calculations — stored in USD, convert to LBP ────────────
-    $lbp_subtotal    = (float)$sale['final_total'] * $usd_to_lbp;
+    // ── Financial calculations — all amounts now native LBP ───────────────
+    $lbp_subtotal    = (float)$sale['final_total'];
     $lbp_vat         = $vat_rate > 0 ? round($lbp_subtotal * ($vat_rate / 100)) : 0;
     $lbp_exact       = round($lbp_subtotal + $lbp_vat);
     $lbp_due         = round($lbp_exact / 5000) * 5000;                      // nearest LL 5,000
@@ -212,11 +212,11 @@ function printEscPos($sale_id, $conn) {
     $d .= BOLD_ON . $hdr_name . $hdr_qty . $hdr_unit . $hdr_sub . LF . BOLD_OFF;
     $d .= str_repeat('-', $W) . LF;
 
-    // Item rows — unit_price stored in USD, convert to LBP
+    // Item rows — unit_price and subtotal now stored in LBP
     foreach ($items as $item) {
-        $unit_lbp = round((float)$item['unit_price'] * $usd_to_lbp);
+        $unit_lbp = round((float)$item['unit_price']);
         $qty_val  = (float)$item['qty'];
-        $sub_lbp  = round((float)$item['subtotal']   * $usd_to_lbp);
+        $sub_lbp  = round((float)$item['subtotal']);
         $qty_disp = ($qty_val != intval($qty_val)) ? number_format($qty_val,3).'kg' : (string)(int)$qty_val;
 
         $name_cell = mb_substr($item['product_name'], 0, $col_name);
@@ -254,7 +254,7 @@ function printEscPos($sale_id, $conn) {
 
     // ── Discount line (shown under totals if applicable) ───────────────────
     if ((float)($sale['discount'] ?? 0) > 0) {
-        $disc_lbp = round((float)$sale['discount'] * $usd_to_lbp);
+        $disc_lbp = round((float)$sale['discount']);
         $d .= twoCol('Discount applied', '-LL ' . number_format($disc_lbp, 0), $W) . LF;
     }
 

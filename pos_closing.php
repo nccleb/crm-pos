@@ -20,7 +20,7 @@ if ($period === 'weekly') {
     $trend_res = mysqli_query($conn,
         "SELECT DATE(created_at) as period_date,
                 COUNT(*) as sales_count,
-                SUM(final_total * $vat * $usd_to_lbp) as revenue
+                SUM(ROUND(ROUND(final_total * $vat / 5000) * 5000)) as revenue
          FROM pos_sales
          WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
            AND status IN ('completed','pending')
@@ -34,7 +34,7 @@ if ($period === 'weekly') {
     $trend_res = mysqli_query($conn,
         "SELECT DATE_FORMAT(created_at, '%Y-%m') as period_date,
                 COUNT(*) as sales_count,
-                SUM(final_total * $vat * $usd_to_lbp) as revenue
+                SUM(ROUND(ROUND(final_total * $vat / 5000) * 5000)) as revenue
          FROM pos_sales
          WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 11 MONTH)
            AND status IN ('completed','pending')
@@ -67,10 +67,10 @@ if ($trend_res) {
 $summary = mysqli_fetch_assoc(mysqli_query($conn,
     "SELECT
         COUNT(*) as total_sales,
-        SUM(total * $vat * $usd_to_lbp)        as gross_total,
-        SUM(discount * $usd_to_lbp)            as total_discounts,
-        SUM(final_total * $vat * $usd_to_lbp)  as net_total,
-        SUM(CASE WHEN status='refunded' THEN final_total * $vat * $usd_to_lbp ELSE 0 END) as refunded_total,
+        SUM(ROUND(ROUND(total       * $vat / 5000) * 5000))   as gross_total,
+        SUM(discount)                                           as total_discounts,
+        SUM(ROUND(ROUND(final_total * $vat / 5000) * 5000))   as net_total,
+        SUM(CASE WHEN status='refunded' THEN ROUND(ROUND(final_total * $vat / 5000) * 5000) ELSE 0 END) as refunded_total,
         COUNT(CASE WHEN status='refunded' THEN 1 END) as refunded_count
      FROM pos_sales
      WHERE DATE(created_at) = '$date' AND status IN ('completed','pending','refunded')"
@@ -80,8 +80,8 @@ $summary = mysqli_fetch_assoc(mysqli_query($conn,
 $by_payment_res = mysqli_query($conn,
     "SELECT payment_method,
         COUNT(*) as count,
-        SUM(final_total * $vat * $usd_to_lbp) as total,
-        SUM(discount * $usd_to_lbp) as discounts
+        SUM(ROUND(ROUND(final_total * $vat / 5000) * 5000)) as total,
+        SUM(discount) as discounts
      FROM pos_sales
      WHERE DATE(created_at) = '$date' AND status IN ('completed','pending')
      GROUP BY payment_method ORDER BY total DESC"
@@ -103,7 +103,7 @@ $expected_lbp = max(0, (float)$cash_row['paid_lbp']  - (float)$cash_row['change_
 
 // ── Hourly breakdown ──────────────────────────────────────────────────────
 $hourly_res = mysqli_query($conn,
-    "SELECT HOUR(created_at) as hr, COUNT(*) as cnt, SUM(final_total * $vat * $usd_to_lbp) as total
+    "SELECT HOUR(created_at) as hr, COUNT(*) as cnt, SUM(ROUND(ROUND(final_total * $vat / 5000) * 5000)) as total
      FROM pos_sales
      WHERE DATE(created_at) = '$date' AND status IN ('completed','pending')
      GROUP BY HOUR(created_at) ORDER BY hr"
@@ -113,7 +113,7 @@ while ($r = mysqli_fetch_assoc($hourly_res)) $hourly[] = $r;
 
 // ── Top products ──────────────────────────────────────────────────────────
 $top_res = mysqli_query($conn,
-    "SELECT si.product_name, SUM(si.qty) as qty_sold, SUM(si.subtotal * $usd_to_lbp) as revenue
+    "SELECT si.product_name, SUM(si.qty) as qty_sold, SUM(si.subtotal) as revenue
      FROM pos_sale_items si
      JOIN pos_sales s ON s.id = si.sale_id
      WHERE DATE(s.created_at) = '$date' AND s.status IN ('completed','pending')
@@ -483,7 +483,7 @@ tr:hover td { background:#fafafa; }
             </thead>
             <tbody>
             <?php foreach ($sales as $s):
-                $final_lbp = round(round((float)$s['final_total'] * $vat * $usd_to_lbp / 5000) * 5000);
+                $final_lbp = round(round((float)$s['final_total'] * $vat / 5000) * 5000);
             ?>
             <tr>
                 <td><strong>#<?= $s['id'] ?></strong></td>
@@ -491,7 +491,7 @@ tr:hover td { background:#fafafa; }
                 <td><?= htmlspecialchars($s['client_name']) ?></td>
                 <td><?= $s['item_count'] ?></td>
                 <td><?= $pay_labels[$s['payment_method']] ?? $s['payment_method'] ?></td>
-                <td><?= $s['discount'] > 0 ? '-LL '.number_format(round((float)$s['discount'] * $usd_to_lbp),0) : '—' ?></td>
+                <td><?= $s['discount'] > 0 ? '-LL '.number_format(round((float)$s['discount']),0) : '—' ?></td>
                 <td><strong>LL <?= number_format($final_lbp, 0) ?></strong></td>
                 <td><span class="badge badge-<?= $s['status'] ?>"><?= ucfirst($s['status']) ?></span></td>
                 <td><?= htmlspecialchars($s['agent_name']) ?></td>

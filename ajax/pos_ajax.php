@@ -108,30 +108,28 @@ switch ($action) {
             break;
         }
 
-        // Items come in as LBP prices — convert to USD for DB storage
-        $total = 0;
+        // Items arrive as LBP prices — store natively in LBP (no conversion)
+        $total_lbp = 0;
         foreach ($items as $item) {
-            $lbp_price = (float)$item['unit_price'];
-            $usd_price = $lbp_price / $usd_to_lbp;
-            $total += $usd_price * (int)$item['qty'];
+            $total_lbp += (float)$item['unit_price'] * (float)$item['qty'];
         }
-        $discount_usd = $discount / $usd_to_lbp;                        // discount arrives in LBP — convert to USD
-        $final_total  = max(0, $total - $discount_usd);                  // pre-VAT, pre-LBP
+        // discount arrives in LBP — store as-is
+        $final_total_lbp = max(0, $total_lbp - $discount);
 
         // Change/remaining — computed server-side in LBP, change_usd always 0
         // Smallest usable denomination in Lebanon = LL 5,000
         $note           = 5000;
-        $total_due_lbp  = round($final_total * (1 + $vat_rate / 100) * $usd_to_lbp / $note) * $note;
+        $total_due_lbp  = round($final_total_lbp * (1 + $vat_rate / 100) / $note) * $note;
         $total_paid_lbp = round($paid_lbp) + round($paid_usd * $usd_to_lbp);
         $net_lbp        = $total_paid_lbp - $total_due_lbp;
         $change_lbp     = $net_lbp >= 0 ? floor($net_lbp / $note) * $note : 0; // floor change (favour store)
         $change_usd     = 0;
 
-        // Insert sale header
+        // Insert sale header — all monetary columns in LBP
         $client_id_sql = $client_id ? $client_id : 'NULL';
         $insert = mysqli_query($conn,
             "INSERT INTO pos_sales (client_id, client_name, total, discount, final_total, payment_method, currency, notes, agent_id, agent_name, paid_usd, paid_lbp, change_usd, change_lbp)
-             VALUES ($client_id_sql, '$client_name', $total, $discount_usd, $final_total, '$payment_method', '$currency', '$notes', $agent_id, '$agent_name', $paid_usd, $paid_lbp, $change_usd, $change_lbp)"
+             VALUES ($client_id_sql, '$client_name', $total_lbp, $discount, $final_total_lbp, '$payment_method', '$currency', '$notes', $agent_id, '$agent_name', $paid_usd, $paid_lbp, $change_usd, $change_lbp)"
         );
 
         if (!$insert) {
@@ -145,14 +143,13 @@ switch ($action) {
         foreach ($items as $item) {
             $product_id   = (int)$item['product_id'];
             $product_name = mysqli_real_escape_string($conn, $item['product_name']);
-            $qty          = (int)$item['qty'];
-            $unit_price_lbp = (float)$item['unit_price'];
-            $unit_price   = $unit_price_lbp / $usd_to_lbp; // convert to USD for DB
-            $subtotal     = $qty * $unit_price;
+            $qty          = (float)$item['qty'];
+            $unit_price_lbp = (float)$item['unit_price'];   // already LBP
+            $subtotal_lbp   = $qty * $unit_price_lbp;       // LBP
 
             mysqli_query($conn,
                 "INSERT INTO pos_sale_items (sale_id, product_id, product_name, qty, unit_price, subtotal)
-                 VALUES ($sale_id, $product_id, '$product_name', $qty, $unit_price, $subtotal)"
+                 VALUES ($sale_id, $product_id, '$product_name', $qty, $unit_price_lbp, $subtotal_lbp)"
             );
 
             // Get stock before update
@@ -189,10 +186,17 @@ switch ($action) {
             $drawer_result = openCashDrawer($conn);
         }
 
+        // ── Log activity ───────────────────────────────────────────────
+        require_once dirname(__FILE__) . '/pos_log.php';
+        $item_count = count($items);
+        posLog($conn, $agent_id, $agent_name, 'sale_completed',
+            "Sale #$sale_id - $client_name - LL " . number_format($final_total_lbp, 0) . " - $item_count item(s)",
+            $sale_id, 'sale');
+
         echo json_encode([
             'success'       => true,
             'sale_id'       => $sale_id,
-            'final_total'   => $final_total,
+            'final_total'   => $final_total_lbp,
             'print_result'  => $print_result,
             'drawer_result' => $drawer_result
         ]);
@@ -233,6 +237,11 @@ switch ($action) {
             "INSERT INTO stock_movements (product_id, product_name, type, qty_change, qty_before, qty_after, note, agent_id, agent_name)
              VALUES ($product_id, '$product_name', '$type', $qty_change, $qty_before, $qty_after, '$note', $agent_id, '$agent_name')"
         );
+
+        require_once dirname(__FILE__) . '/pos_log.php';
+        posLog($conn, $agent_id, $agent_name, 'stock_adjusted',
+            "$product_name - $type - qty change: $qty_change (was $qty_before, now $qty_after)" . ($note ? " - $note" : ''),
+            $product_id, 'product');
 
         echo json_encode(['success'=>true, 'qty_before'=>$qty_before, 'qty_after'=>$qty_after]);
         break;
