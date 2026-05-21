@@ -20,6 +20,21 @@ $company_name    = $co['company_name']    ?? 'NCC CRM';
 $company_phone   = $co['company_phone']   ?? '';
 $company_address = $co['company_address'] ?? '';
 $receipt_footer  = $co['receipt_footer']  ?? 'Thank you for your business!';
+
+// Loyalty — fetch most recent earn/redeem transactions for this sale
+$loyalty_earned   = 0;
+$loyalty_redeemed = 0;
+$loyalty_bal_after = null;
+$loyalty_mode_disp = $co['loyalty_mode'] ?? 'disabled';
+if ($sale['client_id'] && $loyalty_mode_disp !== 'disabled') {
+    $lt_res = mysqli_query($conn,
+        "SELECT type, amount, balance_after FROM pos_loyalty_transactions
+         WHERE sale_id = $sale_id ORDER BY id ASC");
+    while ($lt = mysqli_fetch_assoc($lt_res)) {
+        if ($lt['type'] === 'earned')   { $loyalty_earned   = (int)$lt['amount']; $loyalty_bal_after = (int)$lt['balance_after']; }
+        if ($lt['type'] === 'redeemed') { $loyalty_redeemed = (int)$lt['amount']; }
+    }
+}
 mysqli_close($conn);
 
 $vat_rate   = isset($co['vat_rate'])   && $co['vat_rate']   !== null ? (float)$co['vat_rate']   : 0;
@@ -259,6 +274,41 @@ if ($show_pay):
 </div>
 <?php endif; // has_change ?>
 <?php endif; // show_pay ?>
+
+<?php if ($loyalty_earned > 0 || $loyalty_redeemed > 0): ?>
+<hr class="div-dashed">
+<div class="pay-title">Loyalty <?= ucfirst($loyalty_mode_disp) ?></div>
+<?php if ($loyalty_redeemed > 0): ?>
+<div class="info">
+    <span class="lbl"><?= $loyalty_mode_disp==='points' ? 'Points Redeemed' : 'Wallet Used' ?></span>
+    <span class="val" style="color:#C62828;">
+        <?= $loyalty_mode_disp==='points'
+            ? '-' . number_format($loyalty_redeemed) . ' pts'
+            : '-LL ' . number_format($loyalty_redeemed) ?>
+    </span>
+</div>
+<?php endif; ?>
+<?php if ($loyalty_earned > 0): ?>
+<div class="info">
+    <span class="lbl"><?= $loyalty_mode_disp==='points' ? 'Points Earned' : 'Cashback Earned' ?></span>
+    <span class="val" style="color:#2E7D32;">
+        <?= $loyalty_mode_disp==='points'
+            ? '+' . number_format($loyalty_earned) . ' pts'
+            : '+LL ' . number_format($loyalty_earned) ?>
+    </span>
+</div>
+<?php endif; ?>
+<?php if ($loyalty_bal_after !== null): ?>
+<div class="info">
+    <span class="lbl">New Balance</span>
+    <span class="val">
+        <?= $loyalty_mode_disp==='points'
+            ? number_format($loyalty_bal_after) . ' pts'
+            : 'LL ' . number_format($loyalty_bal_after) ?>
+    </span>
+</div>
+<?php endif; ?>
+<?php endif; ?>
 
 <!-- Footer -->
 <hr class="div-solid">

@@ -1,0 +1,3 @@
+[2026-05-21 05:00:01] === Expiry Alert Cron Started ===
+[2026-05-21 05:00:01] Settings loaded — Email: ON | SMS: OFF | Thresholds: 30/18/15 days
+[2026-05-21 05:00:01] No batches hit a threshold today (30,18,15 days). No alerts sent.

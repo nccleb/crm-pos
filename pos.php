@@ -23,6 +23,11 @@ $usd_to_lbp       = (float)($pos_settings['usd_to_lbp'] ?? 89500);
 $usd_denoms       = $pos_settings['usd_denominations']  ?? '1,5,10,20,50,100';
 $lbp_denoms       = $pos_settings['lbp_denominations']  ?? '5000,10000,20000,50000,100000';
 $vat_rate         = (float)($pos_settings['vat_rate']   ?? 0);
+$loyalty_mode     = $pos_settings['loyalty_mode']       ?? 'disabled';
+$loyalty_rate     = (float)($pos_settings['loyalty_rate'] ?? 2.00);
+$point_value      = (int)($pos_settings['loyalty_point_value'] ?? 1000);
+$min_redeem       = (int)($pos_settings['loyalty_min_redeem']  ?? 5000);
+$ukey_card        = $pos_settings['universal_key_card'] ?? '';
 
 // Pre-compute denomination arrays for JS
 $usd_arr = array_values(array_filter(array_map('intval', explode(',', $usd_denoms))));
@@ -48,16 +53,17 @@ body { background:#f0f2f5; font-family:'Segoe UI',sans-serif; height:100vh; min-
 /* ── Top Bar ── */
 .topbar {
     background:linear-gradient(135deg,#1976D2,#0D47A1);
-    color:white; padding:12px 20px;
-    display:flex; align-items:center; gap:15px;
+    color:white; padding:8px 16px;
+    display:flex; align-items:center; gap:6px;
     box-shadow:0 2px 8px rgba(0,0,0,.2);
+    flex-wrap:wrap;
 }
-.topbar h1 { font-size:18px; font-weight:700; }
-.topbar .agent { margin-left:auto; font-size:13px; opacity:.85; }
+.topbar h1 { font-size:16px; font-weight:700; }
+.topbar .agent { margin-left:auto; font-size:12px; opacity:.85; }
 .topbar a {
     color:white; text-decoration:none; background:rgba(255,255,255,.15);
-    padding:7px 14px; border-radius:6px; font-size:13px; font-weight:600;
-    display:flex; align-items:center; gap:6px;
+    padding:5px 10px; border-radius:6px; font-size:12px; font-weight:600;
+    display:flex; align-items:center; gap:5px; white-space:nowrap;
 }
 .topbar a:hover { background:rgba(255,255,255,.25); }
 
@@ -300,8 +306,8 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
     <a href="pos_archive.php"><i class="fas fa-archive"></i> Archive</a>
     <?php if ($agent_name === 'super'): ?>
     <a href="pos_settings.php"><i class="fas fa-cog"></i> Settings</a>
+    <a href="pos_loyalty.php"><i class="fas fa-star"></i> Loyalty</a>
     <a href="pos_activity.php"><i class="fas fa-history"></i> Activity</a>
-    
     <a href="pos_promotions.php"><i class="fas fa-tags"></i> Promotions</a>
     <?php endif; ?>
     <a href="test204.php?page=<?= urlencode($agent_name) ?>&page1=<?= $agent_id ?>"><i class="fas fa-arrow-left"></i> Back to CRM</a>
@@ -401,6 +407,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
         <div class="pay-summary">
             <div class="pay-row" id="coSubtotalRow"><span>Subtotal</span><span id="coSubtotal">LL 0</span></div>
             <div class="pay-row" id="coDiscountRow" style="display:none;"><span>Discount</span><span id="coDiscount" style="color:#ef4444;">-LL 0</span></div>
+            <div class="pay-row" id="coLoyaltyRow" style="display:none;"><span>&#127919; <?= $loyalty_mode === 'points' ? 'Points Redeemed' : 'Wallet Used' ?></span><span id="coLoyaltyAmt" style="color:#059669;">-LL 0</span></div>
             <div class="pay-row" id="coVatExclRow" style="display:none;"><span id="coVatExclLbl">TOTAL excl. VAT</span><span id="coVatExcl">LL 0</span></div>
             <div class="pay-row" id="coVatRow" style="display:none;color:#1976D2;font-weight:700;"><span id="coVatLbl">VAT</span><span id="coVatAmt">LL 0</span></div>
             <div class="pay-row" id="coExactRow" style="display:none;"><span>TOTAL exact</span><span id="coExact">LL 0</span></div>
@@ -417,6 +424,76 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
                 <input type="number" id="discountInput" value="0" min="0" step="1000" oninput="updateTotals()" placeholder="0" onwheel="event.preventDefault()">
             </div>
         </div>
+
+        <!-- ── Loyalty Panel ─────────────────────────────────────────────── -->
+        <?php if ($loyalty_mode !== 'disabled'): ?>
+        <div class="pay-section" id="loyaltyPanel" style="background:#F0F9FF;border-radius:10px;padding:12px 14px;border:1px solid #BAE6FD;">
+            <span class="pay-section-label" style="color:#0369A1;">
+                <i class="fas fa-star" style="color:#F59E0B;"></i>
+                Loyalty <?= $loyalty_mode === 'points' ? 'Points' : 'Cashback Wallet' ?>
+            </span>
+
+            <!-- Auth state indicator -->
+            <div id="loyaltyAuthState" style="margin-bottom:10px;padding:7px 10px;border-radius:7px;font-size:12px;font-weight:700;background:#FEF3C7;color:#92400E;">
+                &#9888; No loyalty card — scan card or enter phone number
+            </div>
+
+            <!-- Card scan / phone input -->
+            <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <input type="text" id="loyaltyCardInput"
+                    placeholder="Scan loyalty card barcode..."
+                    style="flex:1;padding:8px 10px;border:1px solid #BAE6FD;border-radius:7px;font-size:13px;"
+                    oninput="onLoyaltyInput(this.value)"
+                    onkeydown="if(event.key==='Enter'){scanLoyaltyCard();}">
+                <?php if ($loyalty_mode === 'points'): ?>
+                <input type="text" id="loyaltyPhoneInput"
+                    placeholder="or phone #"
+                    style="width:110px;padding:8px 10px;border:1px solid #BAE6FD;border-radius:7px;font-size:13px;"
+                    onkeydown="if(event.key==='Enter'){lookupByPhone();}">
+                <button onclick="lookupByPhone()"
+                    style="padding:8px 10px;background:#0369A1;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:12px;font-weight:700;">
+                    &#128269;
+                </button>
+                <?php endif; ?>
+            </div>
+
+            <!-- Customer loyalty info — shown after card/phone match -->
+            <div id="loyaltyClientInfo" style="display:none;margin-bottom:8px;padding:8px 10px;background:#fff;border-radius:7px;border:1px solid #BAE6FD;">
+                <div style="font-size:13px;font-weight:700;color:#1e40af;" id="loyaltyClientName"></div>
+                <div style="font-size:12px;color:#6b7280;margin-top:2px;" id="loyaltyBalanceText"></div>
+            </div>
+
+            <!-- Supervisor override — cashback mode only, shown when phone-only -->
+            <?php if ($loyalty_mode === 'cashback'): ?>
+            <div id="supervisorOverrideSection" style="display:none;margin-bottom:8px;padding:8px 10px;background:#FEF3C7;border-radius:7px;border:1px solid #FCD34D;">
+                <div style="font-size:12px;font-weight:700;color:#92400E;margin-bottom:6px;">
+                    &#128273; Supervisor key card required to credit wallet
+                </div>
+                <input type="text" id="supervisorKeyInput"
+                    placeholder="Scan supervisor key card..."
+                    style="width:100%;padding:7px 10px;border:1px solid #FCD34D;border-radius:6px;font-size:13px;"
+                    oninput="onSupervisorKeyInput(this.value)">
+            </div>
+            <?php endif; ?>
+
+            <!-- Redeem toggle — shown when balance available -->
+            <div id="loyaltyRedeemSection" style="display:none;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <span style="font-size:12px;font-weight:700;color:#065F46;">
+                        <?= $loyalty_mode === 'points' ? 'Redeem Points' : 'Use Wallet' ?>
+                    </span>
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="checkbox" id="loyaltyUseToggle" onchange="onLoyaltyToggle()">
+                        <span style="font-size:12px;color:#6b7280;">Apply to this sale</span>
+                    </label>
+                </div>
+                <div id="loyaltyRedeemInfo" style="font-size:12px;color:#6b7280;display:none;padding:6px 8px;background:#ECFDF5;border-radius:6px;">
+                    <span id="loyaltyRedeemDetail"></span>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+        <!-- ── End Loyalty Panel ──────────────────────────────────────────── -->
 
         <!-- Payment Method (non-cash: card/omt/whish/bank/credit) -->
         <div class="pay-section">
@@ -560,6 +637,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
                 <span id="receiptTotal"></span>
             </div>
             <div id="receiptPaymentDetails"></div>
+            <div id="receiptLoyaltySection" style="display:none;"></div>
         </div>
         <div class="receipt-actions">
             <button class="btn-print" onclick="printReceipt()"><i class="fas fa-print"></i> Print</button>
@@ -1037,7 +1115,12 @@ function updateTotals() {
     var subtotal  = cart.reduce((s, i) => s + i.unit_price * i.qty, 0); // LBP
     var discount  = parseFloat(document.getElementById('discountInput') ?
                     document.getElementById('discountInput').value : 0) || 0;
-    var afterDisc = Math.max(0, subtotal - discount);
+
+    // Add loyalty redemption as extra discount
+    var loyaltyDiscLbp = getLoyaltyDiscountLbp();
+    var totalDiscount  = discount + loyaltyDiscLbp;
+
+    var afterDisc = Math.max(0, subtotal - totalDiscount);
     var vatAmt    = VAT_RATE > 0 ? Math.round(afterDisc * (VAT_RATE / 100)) : 0;
     var exactTotal = Math.round(afterDisc + vatAmt);
     var total      = Math.round(exactTotal / LBP_ROUND) * LBP_ROUND; // rounded to nearest LL 5,000
@@ -1047,14 +1130,27 @@ function updateTotals() {
     var coSubtotal = document.getElementById('coSubtotal');
     var coSubtotalRow = document.getElementById('coSubtotalRow');
     if (coSubtotal) coSubtotal.textContent = 'LL ' + Math.round(subtotal).toLocaleString();
-    if (coSubtotalRow) coSubtotalRow.style.display = discount > 0 ? 'flex' : 'none';
+    if (coSubtotalRow) coSubtotalRow.style.display = totalDiscount > 0 ? 'flex' : 'none';
 
-    // Discount
+    // Discount (manual)
     var discRow = document.getElementById('coDiscountRow');
     if (discRow) {
         discRow.style.display = discount > 0 ? 'flex' : 'none';
         var coDisc = document.getElementById('coDiscount');
         if (coDisc) coDisc.textContent = '-LL ' + Math.round(discount).toLocaleString();
+    }
+
+    // Loyalty discount row
+    var loyRow = document.getElementById('coLoyaltyRow');
+    if (loyRow) {
+        loyRow.style.display = loyaltyDiscLbp > 0 ? 'flex' : 'none';
+        var loyAmt = document.getElementById('coLoyaltyAmt');
+        if (loyAmt) {
+            var loyLabel = LOYALTY_MODE === 'points'
+                ? '-LL ' + loyaltyDiscLbp.toLocaleString() + ' (' + loyaltyUseAmount.toLocaleString() + ' pts)'
+                : '-LL ' + loyaltyDiscLbp.toLocaleString();
+            loyAmt.textContent = loyLabel;
+        }
     }
 
     // VAT breakdown rows
@@ -1287,11 +1383,26 @@ var USD_DENOMS = <?= $js_usd_denoms ?>;
 var LBP_DENOMS = <?= $js_lbp_denoms ?>;
 var LBP_ROUND  = 5000; // smallest useful denomination in Lebanon
 
+// ── Loyalty globals ────────────────────────────────────────────────────────
+var LOYALTY_MODE      = '<?= $loyalty_mode ?>';
+var LOYALTY_RATE      = <?= $loyalty_rate ?>;
+var LOYALTY_PV        = <?= $point_value ?>;   // LBP per point
+var LOYALTY_MIN       = <?= $min_redeem ?>;    // min balance/points to redeem
+var UKEY_CARD         = '<?= addslashes($ukey_card) ?>';
+
+var loyaltyClientId   = null;
+var loyaltyClientName = '';
+var loyaltyBalance    = 0;   // wallet LBP or points count
+var loyaltyAuthMethod = 'none'; // none | phone_only | card | supervisor_override
+var loyaltyUseAmount  = 0;   // LBP to deduct (wallet) or points to redeem
+var loyaltySupervisorOvr = false;
+
 // ── Checkout modal ────────────────────────────────────────────────────────
 function openCheckout() {
     if (cart.length === 0) return;
     updateTotals();
     buildDenomButtons();
+    resetLoyalty();
 
     // Auto-suggest payment split: whole USD + LBP for cents
     var subtotal  = cart.reduce((s, i) => s + i.unit_price * i.qty, 0); // LBP
@@ -1473,6 +1584,206 @@ function adjustChangeSplit() {
     warning.style.display = gbuInLbp > netChange + 1000 ? 'block' : 'none';
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// LOYALTY FUNCTIONS
+// ══════════════════════════════════════════════════════════════════════
+
+function resetLoyalty() {
+    loyaltyClientId = null; loyaltyClientName = ''; loyaltyBalance = 0;
+    loyaltyAuthMethod = 'none'; loyaltyUseAmount = 0; loyaltySupervisorOvr = false;
+    if (LOYALTY_MODE === 'disabled') return;
+    setAuthState('none');
+    document.getElementById('loyaltyCardInput').value = '';
+    var ph = document.getElementById('loyaltyPhoneInput');
+    if (ph) ph.value = '';
+    var sk = document.getElementById('supervisorKeyInput');
+    if (sk) sk.value = '';
+    document.getElementById('loyaltyClientInfo').style.display   = 'none';
+    document.getElementById('loyaltyRedeemSection').style.display = 'none';
+    var sovr = document.getElementById('supervisorOverrideSection');
+    if (sovr) sovr.style.display = 'none';
+    var tog = document.getElementById('loyaltyUseToggle');
+    if (tog) tog.checked = false;
+    updateTotals();
+}
+
+function setAuthState(state) {
+    var el = document.getElementById('loyaltyAuthState');
+    if (!el) return;
+    var msgs = {
+        'none':               { bg:'#FEF3C7', color:'#92400E', icon:'&#9888;', text:'No loyalty card — scan card or enter phone number' },
+        'phone_only':         { bg:'#FFF7ED', color:'#C2410C', icon:'&#128222;', text:'Phone lookup only — ' + (LOYALTY_MODE==='cashback' ? 'card required to earn cashback' : 'points will be earned') },
+        'card':               { bg:'#F0FDF4', color:'#166534', icon:'&#10003;', text:'Card verified — full loyalty access' },
+        'supervisor_override':{ bg:'#EFF6FF', color:'#1D4ED8', icon:'&#128273;', text:'Supervisor override — cashback will be credited' },
+    };
+    var m = msgs[state] || msgs['none'];
+    el.style.background = m.bg;
+    el.style.color      = m.color;
+    el.innerHTML        = m.icon + ' ' + m.text;
+    loyaltyAuthMethod   = state;
+}
+
+function onLoyaltyInput(val) {
+    // Auto-detect card scan (usually comes fast and is longer than manual typing)
+    clearTimeout(window._lCardTimer);
+    window._lCardTimer = setTimeout(() => {
+        if (val.length >= 6) scanLoyaltyCard();
+    }, 300);
+}
+
+function scanLoyaltyCard() {
+    var val = document.getElementById('loyaltyCardInput').value.trim();
+    if (!val) return;
+    fetch('ajax/pos_loyalty_ajax.php?action=lookup_card&barcode=' + encodeURIComponent(val))
+        .then(r => r.json()).then(data => {
+        if (!data.success) {
+            setAuthState('none');
+            document.getElementById('loyaltyClientInfo').style.display = 'none';
+            document.getElementById('loyaltyRedeemSection').style.display = 'none';
+            return;
+        }
+        if (data.is_universal_key) {
+            // Supervisor key card scanned — apply override if we already have a phone-lookup client
+            if (loyaltyClientId && loyaltyAuthMethod === 'phone_only') {
+                loyaltySupervisorOvr = true;
+                setAuthState('supervisor_override');
+                var sovr = document.getElementById('supervisorOverrideSection');
+                if (sovr) sovr.style.display = 'none';
+                document.getElementById('supervisorKeyInput') && (document.getElementById('supervisorKeyInput').value = '');
+                showLoyaltyRedeemSection();
+            }
+            document.getElementById('loyaltyCardInput').value = '';
+            return;
+        }
+        // Regular loyalty card
+        setLoyaltyClient(data.client, 'card');
+        document.getElementById('loyaltyCardInput').value = '';
+    });
+}
+
+function lookupByPhone() {
+    var ph = document.getElementById('loyaltyPhoneInput');
+    if (!ph) return;
+    var val = ph.value.trim();
+    if (!val) return;
+    fetch('ajax/pos_loyalty_ajax.php?action=lookup_phone&phone=' + encodeURIComponent(val))
+        .then(r => r.json()).then(data => {
+        if (!data.success) {
+            alert('Customer not found with that phone number.');
+            return;
+        }
+        setLoyaltyClient(data.client, 'phone_only');
+    });
+}
+
+function onSupervisorKeyInput(val) {
+    clearTimeout(window._sKeyTimer);
+    window._sKeyTimer = setTimeout(() => {
+        if (val.length >= 6 && UKEY_CARD && val === UKEY_CARD) {
+            loyaltySupervisorOvr = true;
+            setAuthState('supervisor_override');
+            document.getElementById('supervisorOverrideSection').style.display = 'none';
+            document.getElementById('supervisorKeyInput').value = '';
+            showLoyaltyRedeemSection();
+        }
+    }, 250);
+}
+
+function setLoyaltyClient(client, authMethod) {
+    loyaltyClientId   = client.id;
+    loyaltyClientName = client.name;
+    loyaltyBalance    = LOYALTY_MODE === 'cashback' ? client.wallet_balance : client.loyalty_points;
+    setAuthState(authMethod);
+
+    // Show client info box
+    var ci = document.getElementById('loyaltyClientInfo');
+    ci.style.display = '';
+    document.getElementById('loyaltyClientName').textContent = client.name;
+    var balText = LOYALTY_MODE === 'cashback'
+        ? 'Wallet: LL ' + loyaltyBalance.toLocaleString()
+        : 'Points: ' + loyaltyBalance.toLocaleString() + ' pts';
+    document.getElementById('loyaltyBalanceText').textContent = balText;
+
+    // In cashback mode with phone-only auth: show supervisor override section
+    if (LOYALTY_MODE === 'cashback' && authMethod === 'phone_only') {
+        var sovr = document.getElementById('supervisorOverrideSection');
+        if (sovr) sovr.style.display = '';
+        document.getElementById('loyaltyRedeemSection').style.display = 'none';
+    } else {
+        var sovr = document.getElementById('supervisorOverrideSection');
+        if (sovr) sovr.style.display = 'none';
+        showLoyaltyRedeemSection();
+    }
+}
+
+function showLoyaltyRedeemSection() {
+    var canRedeem = LOYALTY_MODE === 'cashback'
+        ? loyaltyBalance >= LOYALTY_MIN
+        : loyaltyBalance >= LOYALTY_MIN;
+    var sec = document.getElementById('loyaltyRedeemSection');
+    sec.style.display = canRedeem ? '' : 'none';
+    if (!canRedeem) {
+        loyaltyUseAmount = 0;
+        updateTotals();
+        return;
+    }
+    var tog = document.getElementById('loyaltyUseToggle');
+    if (tog) tog.checked = false;
+    document.getElementById('loyaltyRedeemInfo').style.display = 'none';
+    loyaltyUseAmount = 0;
+    updateTotals();
+}
+
+function onLoyaltyToggle() {
+    var tog  = document.getElementById('loyaltyUseToggle');
+    var info = document.getElementById('loyaltyRedeemInfo');
+    var det  = document.getElementById('loyaltyRedeemDetail');
+    if (!tog.checked) {
+        loyaltyUseAmount = 0;
+        info.style.display = 'none';
+        updateTotals();
+        return;
+    }
+    // Calculate how much can be used
+    var subtotal = cart.reduce((s,i) => s + i.unit_price * i.qty, 0);
+    var disc     = parseFloat(document.getElementById('discountInput').value) || 0;
+    var afterDisc = Math.max(0, subtotal - disc);
+    if (LOYALTY_MODE === 'cashback') {
+        loyaltyUseAmount = Math.min(loyaltyBalance, afterDisc);
+        det.textContent  = 'Wallet -LL ' + loyaltyUseAmount.toLocaleString() + ' will be applied';
+    } else {
+        // Points: convert to LBP
+        var maxLbp        = loyaltyBalance * LOYALTY_PV;
+        var useLbp        = Math.min(maxLbp, afterDisc);
+        var usePoints     = Math.ceil(useLbp / LOYALTY_PV);
+        loyaltyUseAmount  = usePoints; // store as points count
+        det.textContent   = 'Redeem ' + usePoints.toLocaleString() + ' pts = -LL ' + (usePoints * LOYALTY_PV).toLocaleString();
+    }
+    info.style.display = '';
+    updateTotals();
+}
+
+function getLoyaltyDiscountLbp() {
+    if (!loyaltyClientId || loyaltyUseAmount <= 0) return 0;
+    if (LOYALTY_MODE === 'cashback') return loyaltyUseAmount;
+    if (LOYALTY_MODE === 'points')   return loyaltyUseAmount * LOYALTY_PV;
+    return 0;
+}
+
+function getLoyaltyEarnPreview(amountPaid) {
+    if (!loyaltyClientId) return 0;
+    if (LOYALTY_MODE === 'cashback') {
+        var canEarn = (loyaltyAuthMethod === 'card' || loyaltyAuthMethod === 'supervisor_override');
+        if (!canEarn) return 0;
+        return Math.floor(amountPaid * LOYALTY_RATE / 100 / 1000) * 1000;
+    }
+    if (LOYALTY_MODE === 'points') {
+        return Math.floor((amountPaid / 1000) * LOYALTY_RATE);
+    }
+    return 0;
+}
+
+// ══════════════════════════════════════════════════════════════════════
 function completeSale() {
     if (cart.length === 0) return;
     var subtotal  = cart.reduce((s, i) => s + i.unit_price * i.qty, 0); // LBP
@@ -1512,13 +1823,19 @@ function completeSale() {
     fd.append('client_name',    selectedClientName);
     fd.append('payment_method', paymentMethod);
     fd.append('currency',       'LBP');
-    fd.append('discount',       discount);      // send in LBP — pos_ajax.php converts to USD
+    fd.append('discount',       discount);
     fd.append('paid_usd',       paidUsd);
     fd.append('paid_lbp',       paidLbp);
     fd.append('change_usd',     changeUsd);
     fd.append('change_lbp',     changeLbp);
-    fd.append('exact_lbp',      Math.round(afterDisc + vatAmt)); // exact LBP before LL 5,000 rounding
+    fd.append('exact_lbp',      Math.round(afterDisc + vatAmt));
     fd.append('items',          JSON.stringify(cart));
+    // Loyalty params
+    fd.append('loyalty_client_id',         loyaltyClientId || '');
+    fd.append('loyalty_auth',              loyaltyAuthMethod);
+    fd.append('loyalty_supervisor_override', loyaltySupervisorOvr ? '1' : '');
+    fd.append('loyalty_use_wallet',        LOYALTY_MODE === 'cashback' ? getLoyaltyDiscountLbp() : 0);
+    fd.append('loyalty_use_points',        LOYALTY_MODE === 'points'   ? loyaltyUseAmount : 0);
 
     fetch('ajax/pos_ajax.php', { method:'POST', body:fd })
         .then(r => {
@@ -1528,7 +1845,8 @@ function completeSale() {
         .then(data => {
             if (data.success) {
                 document.getElementById('checkoutOverlay').classList.remove('show');
-                showReceipt(data.sale_id, total, subtotal, discount, paidUsd, paidLbp, changeUsd, changeLbp);
+                resetLoyalty();
+                showReceipt(data.sale_id, total, subtotal, discount, paidUsd, paidLbp, changeUsd, changeLbp, data);
             } else {
                 alert('Sale error: ' + (data.error || 'Unknown error'));
                 btn.disabled = false;
@@ -1542,7 +1860,7 @@ function completeSale() {
         });
 }
 
-function showReceipt(saleId, total, subtotal, discount, paidUsd, paidLbp, changeUsd, changeLbp) {
+function showReceipt(saleId, total, subtotal, discount, paidUsd, paidLbp, changeUsd, changeLbp, saleData) {
     currentSaleId = saleId;
     var payLabels = { cash:'Cash', card:'Card', omt:'OMT', whish:'Whish', bank_transfer:'Bank Transfer', credit:'Credit' };
 
@@ -1595,6 +1913,36 @@ function showReceipt(saleId, total, subtotal, discount, paidUsd, paidLbp, change
 
     // TOTAL DUE
     document.getElementById('receiptTotal').textContent = 'LL ' + total.toLocaleString();
+
+    // Loyalty summary on receipt
+    var loySection = document.getElementById('receiptLoyaltySection');
+    if (loySection && saleData && LOYALTY_MODE !== 'disabled' && saleData.loyalty_client_id) {
+        var lHtml = '<div style="border-top:1px dashed #e5e7eb;margin-top:10px;padding-top:10px;">' +
+            '<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:6px;">&#127919; Loyalty ' + (LOYALTY_MODE === 'points' ? 'Points' : 'Cashback') + '</div>';
+        if (saleData.loyalty_redeemed > 0) {
+            var redLabel = LOYALTY_MODE === 'points'
+                ? saleData.loyalty_redeemed.toLocaleString() + ' pts used'
+                : 'LL ' + saleData.loyalty_redeemed.toLocaleString() + ' wallet used';
+            lHtml += '<div class="receipt-row" style="color:#ef4444;"><span class="label">' + (LOYALTY_MODE === 'points' ? 'Points Redeemed' : 'Wallet Used') + '</span><span class="value">-' + redLabel + '</span></div>';
+        }
+        if (saleData.loyalty_earned > 0) {
+            var earnLabel = LOYALTY_MODE === 'points'
+                ? '+' + saleData.loyalty_earned.toLocaleString() + ' pts'
+                : '+LL ' + saleData.loyalty_earned.toLocaleString();
+            lHtml += '<div class="receipt-row" style="color:#059669;"><span class="label">' + (LOYALTY_MODE === 'points' ? 'Points Earned' : 'Cashback Earned') + '</span><span class="value">' + earnLabel + '</span></div>';
+        }
+        if (saleData.loyalty_balance_after > 0) {
+            var balLabel = LOYALTY_MODE === 'points'
+                ? saleData.loyalty_balance_after.toLocaleString() + ' pts'
+                : 'LL ' + saleData.loyalty_balance_after.toLocaleString();
+            lHtml += '<div class="receipt-row" style="font-weight:700;"><span class="label">New Balance</span><span class="value">' + balLabel + '</span></div>';
+        }
+        lHtml += '</div>';
+        loySection.innerHTML = lHtml;
+        loySection.style.display = '';
+    } else if (loySection) {
+        loySection.style.display = 'none';
+    }
 
     // Payment details (cash only)
     var payDetails = document.getElementById('receiptPaymentDetails');

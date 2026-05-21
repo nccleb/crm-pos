@@ -34,6 +34,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $drawer_usb_name = mysqli_real_escape_string($conn, trim($_POST['drawer_usb_name'] ?? ''));
     $usd_denoms      = mysqli_real_escape_string($conn, trim($_POST['usd_denominations'] ?? '1,5,10,20,50,100'));
     $lbp_denoms      = mysqli_real_escape_string($conn, trim($_POST['lbp_denominations'] ?? '5000,10000,20000,50000,100000'));
+    $loyalty_mode    = in_array($_POST['loyalty_mode'] ?? '', ['disabled','points','cashback']) ? $_POST['loyalty_mode'] : 'disabled';
+    $loyalty_rate    = (float)($_POST['loyalty_rate']        ?? 2.00);
+    $loyalty_pv      = (int)($_POST['loyalty_point_value']   ?? 1000);
+    $loyalty_min     = (int)($_POST['loyalty_min_redeem']    ?? 5000);
+    $ukey_card       = mysqli_real_escape_string($conn, trim($_POST['universal_key_card'] ?? ''));
 
     if (empty($company_name)) {
         $msg = 'Company name cannot be empty.';
@@ -60,7 +65,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 disc_regular  = $disc_regular,
                 disc_gold     = $disc_gold,
                 disc_platinum = $disc_platinum,
-                disc_premium  = $disc_premium
+                disc_premium  = $disc_premium,
+                loyalty_mode        = '$loyalty_mode',
+                loyalty_rate        = $loyalty_rate,
+                loyalty_point_value = $loyalty_pv,
+                loyalty_min_redeem  = $loyalty_min,
+                universal_key_card  = " . ($ukey_card ? "'$ukey_card'" : "NULL") . "
                 WHERE id = {$exists['id']}");
         } else {
             mysqli_query($conn, "INSERT INTO company_settings
@@ -434,6 +444,109 @@ error_reporting(E_ALL); endif; ?>
                 Set to 0 for no discount. Changes take effect immediately after saving.
                 The discount is applied to the cart subtotal before VAT.
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Loyalty Program ────────────────────────────────────────────────────── -->
+<div style="max-width:900px;margin:24px auto 0;padding:0 20px;">
+    <div style="background:white;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.08);overflow:hidden;">
+        <div style="padding:20px 28px;border-bottom:1px solid #f0f2f5;display:flex;align-items:center;gap:10px;">
+            <i class="fas fa-star" style="color:#F59E0B;font-size:18px;"></i>
+            <div>
+                <div style="font-size:16px;font-weight:800;color:#1a1a2e;">Loyalty Program</div>
+                <div style="font-size:12px;color:#9ca3af;margin-top:2px;">
+                    Choose between Points or Cashback Wallet — only one active at a time.
+                    Manage enrolled clients and print cards at
+                    <a href="pos_loyalty.php" style="color:#1976D2;">pos_loyalty.php</a>
+                </div>
+            </div>
+        </div>
+        <div style="padding:24px 28px;">
+            <?php
+            $lmode  = $settings['loyalty_mode']        ?? 'disabled';
+            $lrate  = (float)($settings['loyalty_rate'] ?? 2.00);
+            $lpv    = (int)($settings['loyalty_point_value'] ?? 1000);
+            $lmin   = (int)($settings['loyalty_min_redeem']  ?? 5000);
+            $lukey  = $settings['universal_key_card']  ?? '';
+            ?>
+
+            <!-- Mode selector -->
+            <div style="margin-bottom:20px;">
+                <label style="display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px;">Loyalty Mode</label>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                    <?php foreach ([['disabled','Disabled','#6b7280'],['points','Points','#1976D2'],['cashback','Cashback Wallet','#2E7D32']] as [$val,$lbl,$col]): ?>
+                    <label style="display:flex;align-items:center;gap:8px;padding:10px 16px;border:2px solid <?= $lmode===$val ? $col : '#e5e7eb' ?>;border-radius:10px;cursor:pointer;background:<?= $lmode===$val ? $col.'15' : 'white' ?>;">
+                        <input type="radio" name="loyalty_mode" value="<?= $val ?>" form="settingsForm" <?= $lmode===$val?'checked':'' ?>>
+                        <span style="font-size:13px;font-weight:700;color:<?= $col ?>;"><?= $lbl ?></span>
+                    </label>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+
+            <!-- Points settings -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px;">
+                <div>
+                    <label style="display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px;">
+                        Cashback Rate (%) &nbsp;|&nbsp; Points per LL 1,000
+                    </label>
+                    <input type="number" name="loyalty_rate" value="<?= $lrate ?>" min="0.1" max="50" step="0.1"
+                        form="settingsForm"
+                        style="width:100%;padding:9px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;font-weight:700;">
+                    <div style="font-size:11px;color:#9ca3af;margin-top:4px;">
+                        Cashback: % of sale credited to wallet. Points: points earned per LL 1,000 spent.
+                    </div>
+                </div>
+                <div>
+                    <label style="display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px;">
+                        1 Point Value (LL) — Points mode only
+                    </label>
+                    <input type="number" name="loyalty_point_value" value="<?= $lpv ?>" min="100" step="100"
+                        form="settingsForm"
+                        style="width:100%;padding:9px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;font-weight:700;">
+                    <div style="font-size:11px;color:#9ca3af;margin-top:4px;">
+                        e.g. 1000 = 1 point = LL 1,000 when redeeming.
+                    </div>
+                </div>
+                <div>
+                    <label style="display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px;">
+                        Minimum Balance to Redeem
+                    </label>
+                    <input type="number" name="loyalty_min_redeem" value="<?= $lmin ?>" min="0" step="1000"
+                        form="settingsForm"
+                        style="width:100%;padding:9px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;font-weight:700;">
+                    <div style="font-size:11px;color:#9ca3af;margin-top:4px;">
+                        LL for cashback wallet, points count for points mode.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Universal key card — cashback only -->
+            <div style="border-top:1px solid #f0f2f5;padding-top:16px;margin-top:4px;">
+                <label style="display:block;font-size:12px;font-weight:700;color:#92400E;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px;">
+                    &#128273; Universal Supervisor Key Card (Cashback mode)
+                </label>
+                <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:260px;">
+                        <input type="text" name="universal_key_card" value="<?= htmlspecialchars($lukey) ?>"
+                            form="settingsForm"
+                            placeholder="Scan the physical key card into this field..."
+                            style="width:100%;padding:9px 12px;border:2px solid #FCD34D;border-radius:8px;font-size:14px;font-weight:700;font-family:'Courier New',monospace;">
+                        <div style="font-size:11px;color:#92400E;margin-top:4px;">
+                            Required for cashback mode when customer forgets their card.
+                            Supervisor scans this card at the register to authorize earning.
+                            Keep it secure — it overrides card authentication.
+                        </div>
+                    </div>
+                    <?php if ($lukey): ?>
+                    <div style="padding-top:2px;">
+                        <div style="font-size:12px;color:#2E7D32;font-weight:700;">&#10003; Key card set</div>
+                        <div style="font-size:11px;color:#6b7280;font-family:monospace;"><?= htmlspecialchars($lukey) ?></div>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+
         </div>
     </div>
 </div>
