@@ -27,15 +27,52 @@ $action = $_POST['action'] ?? $_GET['action'] ?? '';
 function getLoyaltySettings($conn) {
     $row = mysqli_fetch_assoc(mysqli_query($conn,
         "SELECT loyalty_mode, loyalty_rate, loyalty_point_value,
-                loyalty_min_redeem, universal_key_card
+                loyalty_min_redeem, universal_key_card, loyalty_min_grade,
+                loyalty_rate_regular, loyalty_rate_gold,
+                loyalty_rate_platinum, loyalty_rate_premium,
+                grade_gold_threshold, grade_platinum_threshold, grade_premium_threshold,
+                loyalty_inactivity_days
          FROM company_settings LIMIT 1"));
     return $row ?: [
-        'loyalty_mode'        => 'disabled',
-        'loyalty_rate'        => 2.00,
-        'loyalty_point_value' => 1000,
-        'loyalty_min_redeem'  => 5000,
-        'universal_key_card'  => null,
+        'loyalty_mode'         => 'disabled',
+        'loyalty_rate'         => 2.00,
+        'loyalty_point_value'  => 1000,
+        'loyalty_min_redeem'   => 5000,
+        'universal_key_card'   => null,
+        'loyalty_min_grade'    => 'gold',
+        'loyalty_rate_regular' => 1.00,
+        'loyalty_rate_gold'    => 1.50,
+        'loyalty_rate_platinum'=> 2.00,
+        'loyalty_rate_premium' => 2.50,
+        'grade_gold_threshold'     => 5000000,
+        'grade_platinum_threshold' => 15000000,
+        'grade_premium_threshold'  => 30000000,
+        'loyalty_inactivity_days'  => 180,
     ];
+}
+
+function gradeCanRedeem($client_grade, $min_grade) {
+    $order = ['regular'=>0,'gold'=>1,'platinum'=>2,'premium'=>3];
+    return ($order[$client_grade] ?? 0) >= ($order[$min_grade] ?? 1);
+}
+
+function gradeEarnRate($client_grade, $settings) {
+    return match($client_grade) {
+        'gold'     => (float)($settings['loyalty_rate_gold']     ?? 1.50),
+        'platinum' => (float)($settings['loyalty_rate_platinum'] ?? 2.00),
+        'premium'  => (float)($settings['loyalty_rate_premium']  ?? 2.50),
+        default    => (float)($settings['loyalty_rate_regular']  ?? 1.00),
+    };
+}
+
+function nextGrade($grade, $settings) {
+    $map = [
+        'regular'  => ['gold',     (int)($settings['grade_gold_threshold']     ?? 5000000)],
+        'gold'     => ['platinum', (int)($settings['grade_platinum_threshold'] ?? 15000000)],
+        'platinum' => ['premium',  (int)($settings['grade_premium_threshold']  ?? 30000000)],
+        'premium'  => [null, null],
+    ];
+    return $map[$grade] ?? [null, null];
 }
 
 function getClientLoyalty($conn, $client_id) {
@@ -62,7 +99,7 @@ switch ($action) {
 
         // Look up client by loyalty_card
         $client = mysqli_fetch_assoc(mysqli_query($conn,
-            "SELECT id, nom, prenom, company, number,
+            "SELECT id, nom, prenom, company, number, grade,
                     loyalty_card, wallet_balance, loyalty_points, total_spent
              FROM client WHERE loyalty_card = '$barcode' LIMIT 1"));
 
@@ -71,20 +108,29 @@ switch ($action) {
             break;
         }
 
-        $name = trim(($client['prenom'] ?? '') . ' ' . ($client['nom'] ?? ''));
+        $name       = trim(($client['prenom'] ?? '') . ' ' . ($client['nom'] ?? ''));
         if (empty(trim($name))) $name = $client['company'] ?? 'Unknown';
+        $grade      = $client['grade'] ?? 'regular';
+        $can_redeem = gradeCanRedeem($grade, $settings['loyalty_min_grade'] ?? 'gold');
+        $earn_rate  = gradeEarnRate($grade, $settings);
+        [$next_g, $next_thr] = nextGrade($grade, $settings);
 
         echo json_encode([
             'success'         => true,
             'is_universal_key'=> false,
             'client'          => [
-                'id'              => $client['id'],
-                'name'            => $name,
-                'number'          => $client['number'],
-                'loyalty_card'    => $client['loyalty_card'],
-                'wallet_balance'  => (int)$client['wallet_balance'],
-                'loyalty_points'  => (int)$client['loyalty_points'],
-                'total_spent'     => (int)$client['total_spent'],
+                'id'             => $client['id'],
+                'name'           => $name,
+                'number'         => $client['number'],
+                'loyalty_card'   => $client['loyalty_card'],
+                'wallet_balance' => (int)$client['wallet_balance'],
+                'loyalty_points' => (int)$client['loyalty_points'],
+                'total_spent'    => (int)$client['total_spent'],
+                'grade'          => $grade,
+                'can_redeem'     => $can_redeem,
+                'earn_rate'      => $earn_rate,
+                'next_grade'     => $next_g,
+                'next_threshold' => $next_thr,
             ],
             'settings' => $settings,
         ]);
@@ -98,7 +144,7 @@ switch ($action) {
         $settings = getLoyaltySettings($conn);
 
         $client = mysqli_fetch_assoc(mysqli_query($conn,
-            "SELECT id, nom, prenom, company, number,
+            "SELECT id, nom, prenom, company, number, grade,
                     loyalty_card, wallet_balance, loyalty_points, total_spent
              FROM client WHERE number LIKE '%$phone%' LIMIT 1"));
 
@@ -107,8 +153,12 @@ switch ($action) {
             break;
         }
 
-        $name = trim(($client['prenom'] ?? '') . ' ' . ($client['nom'] ?? ''));
+        $name       = trim(($client['prenom'] ?? '') . ' ' . ($client['nom'] ?? ''));
         if (empty(trim($name))) $name = $client['company'] ?? 'Unknown';
+        $grade      = $client['grade'] ?? 'regular';
+        $can_redeem = gradeCanRedeem($grade, $settings['loyalty_min_grade'] ?? 'gold');
+        $earn_rate  = gradeEarnRate($grade, $settings);
+        [$next_g, $next_thr] = nextGrade($grade, $settings);
 
         echo json_encode([
             'success' => true,
@@ -120,6 +170,11 @@ switch ($action) {
                 'wallet_balance' => (int)$client['wallet_balance'],
                 'loyalty_points' => (int)$client['loyalty_points'],
                 'total_spent'    => (int)$client['total_spent'],
+                'grade'          => $grade,
+                'can_redeem'     => $can_redeem,
+                'earn_rate'      => $earn_rate,
+                'next_grade'     => $next_g,
+                'next_threshold' => $next_thr,
             ],
             'settings' => $settings,
         ]);
@@ -317,9 +372,20 @@ switch ($action) {
                                 OR number LIKE '%$q%' OR loyalty_card LIKE '%$q%'
                                 OR company LIKE '%$q%')";
 
+        $settings_e = getLoyaltySettings($conn);
+        $tg  = (int)($settings_e['grade_gold_threshold']     ?? 5000000);
+        $tp  = (int)($settings_e['grade_platinum_threshold'] ?? 15000000);
+        $tpm = (int)($settings_e['grade_premium_threshold']  ?? 30000000);
+
         $res = mysqli_query($conn,
             "SELECT id, nom, prenom, company, number, loyalty_card,
-                    wallet_balance, loyalty_points, total_spent, loyalty_enrolled
+                    wallet_balance, loyalty_points, total_spent, loyalty_enrolled,
+                    CASE
+                        WHEN total_spent >= $tpm THEN 'premium'
+                        WHEN total_spent >= $tp  THEN 'platinum'
+                        WHEN total_spent >= $tg  THEN 'gold'
+                        ELSE 'regular'
+                    END AS grade
              FROM client $where ORDER BY loyalty_enrolled DESC LIMIT 100");
         $clients = [];
         while ($r = mysqli_fetch_assoc($res)) $clients[] = $r;
@@ -331,7 +397,53 @@ switch ($action) {
                     SUM(loyalty_points) as total_points
              FROM client WHERE loyalty_card IS NOT NULL"));
 
-        echo json_encode(['success' => true, 'clients' => $clients, 'totals' => $totals]);
+        echo json_encode([
+            'success'  => true,
+            'clients'  => $clients,
+            'totals'   => $totals,
+            'settings' => $settings_e,
+        ]);
+        break;
+
+    // ── Manual grade set (super only — for demotion) ──────────────────────────
+    case 'set_grade':
+        if (!$is_super) { echo json_encode(['success' => false, 'error' => 'Super only']); break; }
+        $client_id = (int)($_POST['client_id'] ?? 0);
+        $new_grade = in_array($_POST['grade'] ?? '', ['regular','gold','platinum','premium'])
+                     ? $_POST['grade'] : 'regular';
+        if (!$client_id) { echo json_encode(['success' => false, 'error' => 'No client']); break; }
+        $old = mysqli_fetch_assoc(mysqli_query($conn,
+            "SELECT grade, nom, prenom FROM client WHERE id = $client_id LIMIT 1"));
+        mysqli_query($conn, "UPDATE client SET grade = '$new_grade' WHERE id = $client_id");
+        require_once dirname(__FILE__) . '/pos_log.php';
+        $cname = mysqli_real_escape_string($conn, trim(($old['prenom']??'').' '.($old['nom']??'')));
+        posLog($conn, $agent_id, $agent_name, 'grade_set',
+            "$cname grade changed from {$old['grade']} to $new_grade by $agent_name",
+            $client_id, 'client');
+        echo json_encode(['success' => true]);
+        break;
+
+    // ── Inactive clients ───────────────────────────────────────────────────────
+    case 'get_inactive':
+        $settings = getLoyaltySettings($conn);
+        $days     = (int)($settings['loyalty_inactivity_days'] ?? 180);
+        $res = mysqli_query($conn,
+            "SELECT c.id, c.nom, c.prenom, c.company, c.number, c.grade,
+                    c.loyalty_card, c.wallet_balance, c.loyalty_points,
+                    c.total_spent, c.last_purchase_date,
+                    DATEDIFF(CURDATE(), c.last_purchase_date) AS days_inactive,
+                    MAX(s.created_at) AS last_sale_date
+             FROM client c
+             LEFT JOIN pos_sales s ON s.client_id = c.id AND s.status = 'completed'
+             WHERE c.loyalty_card IS NOT NULL
+               AND c.last_purchase_date IS NOT NULL
+               AND DATEDIFF(CURDATE(), c.last_purchase_date) >= $days
+             GROUP BY c.id
+             ORDER BY days_inactive DESC
+             LIMIT 100");
+        $clients = [];
+        while ($r = mysqli_fetch_assoc($res)) $clients[] = $r;
+        echo json_encode(['success' => true, 'clients' => $clients, 'threshold_days' => $days]);
         break;
 
     default:

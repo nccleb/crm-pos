@@ -39,6 +39,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $loyalty_pv      = (int)($_POST['loyalty_point_value']   ?? 1000);
     $loyalty_min     = (int)($_POST['loyalty_min_redeem']    ?? 5000);
     $ukey_card       = mysqli_real_escape_string($conn, trim($_POST['universal_key_card'] ?? ''));
+    $loyalty_min_grd = in_array($_POST['loyalty_min_grade'] ?? '', ['regular','gold','platinum','premium']) ? $_POST['loyalty_min_grade'] : 'gold';
+    $loyalty_inact   = (int)($_POST['loyalty_inactivity_days'] ?? 180);
+    $lr_regular      = (float)($_POST['loyalty_rate_regular']  ?? 1.00);
+    $lr_gold         = (float)($_POST['loyalty_rate_gold']     ?? 1.50);
+    $lr_platinum     = (float)($_POST['loyalty_rate_platinum'] ?? 2.00);
+    $lr_premium      = (float)($_POST['loyalty_rate_premium']  ?? 2.50);
+    $thr_gold        = (int)($_POST['grade_gold_threshold']    ?? 5000000);
+    $thr_platinum    = (int)($_POST['grade_platinum_threshold'] ?? 15000000);
+    $thr_premium     = (int)($_POST['grade_premium_threshold'] ?? 30000000);
 
     if (empty($company_name)) {
         $msg = 'Company name cannot be empty.';
@@ -70,7 +79,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 loyalty_rate        = $loyalty_rate,
                 loyalty_point_value = $loyalty_pv,
                 loyalty_min_redeem  = $loyalty_min,
-                universal_key_card  = " . ($ukey_card ? "'$ukey_card'" : "NULL") . "
+                universal_key_card  = " . ($ukey_card ? "'$ukey_card'" : "NULL") . ",
+                loyalty_min_grade        = '$loyalty_min_grd',
+                loyalty_inactivity_days  = $loyalty_inact,
+                loyalty_rate_regular     = $lr_regular,
+                loyalty_rate_gold        = $lr_gold,
+                loyalty_rate_platinum    = $lr_platinum,
+                loyalty_rate_premium     = $lr_premium,
+                grade_gold_threshold     = $thr_gold,
+                grade_platinum_threshold = $thr_platinum,
+                grade_premium_threshold  = $thr_premium
                 WHERE id = {$exists['id']}");
         } else {
             mysqli_query($conn, "INSERT INTO company_settings
@@ -464,11 +482,20 @@ error_reporting(E_ALL); endif; ?>
         </div>
         <div style="padding:24px 28px;">
             <?php
-            $lmode  = $settings['loyalty_mode']        ?? 'disabled';
-            $lrate  = (float)($settings['loyalty_rate'] ?? 2.00);
-            $lpv    = (int)($settings['loyalty_point_value'] ?? 1000);
-            $lmin   = (int)($settings['loyalty_min_redeem']  ?? 5000);
-            $lukey  = $settings['universal_key_card']  ?? '';
+            $lmode   = $settings['loyalty_mode']        ?? 'disabled';
+            $lrate   = (float)($settings['loyalty_rate'] ?? 2.00);
+            $lpv     = (int)($settings['loyalty_point_value'] ?? 1000);
+            $lmin    = (int)($settings['loyalty_min_redeem']  ?? 5000);
+            $lukey   = $settings['universal_key_card']   ?? '';
+            $lmingrd = $settings['loyalty_min_grade']    ?? 'gold';
+            $lrinact = (int)($settings['loyalty_inactivity_days'] ?? 180);
+            $rr      = (float)($settings['loyalty_rate_regular']  ?? 1.00);
+            $rg      = (float)($settings['loyalty_rate_gold']     ?? 1.50);
+            $rp      = (float)($settings['loyalty_rate_platinum'] ?? 2.00);
+            $rpm     = (float)($settings['loyalty_rate_premium']  ?? 2.50);
+            $tgold   = (int)($settings['grade_gold_threshold']    ?? 5000000);
+            $tplat   = (int)($settings['grade_platinum_threshold'] ?? 15000000);
+            $tprem   = (int)($settings['grade_premium_threshold'] ?? 30000000);
             ?>
 
             <!-- Mode selector -->
@@ -520,6 +547,71 @@ error_reporting(E_ALL); endif; ?>
                     </div>
                 </div>
             </div>
+
+            <!-- Universal key card — cashback only -->
+            <div style="border-top:1px solid #f0f2f5;padding-top:16px;margin-top:4px;">
+
+            <!-- Grade upgrade thresholds -->
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px;">
+                    &#129081; Automatic Grade Upgrade Thresholds (Total Lifetime Spending in LL)
+                </label>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+                    <?php foreach([['Gold','gold','#F59E0B',$tgold],['Platinum','platinum','#6366F1',$tplat],['Premium','premium','#EC4899',$tprem]] as [$lbl,$val,$col,$thr]): ?>
+                    <div>
+                        <label style="display:block;font-size:11px;font-weight:700;color:<?= $col ?>;margin-bottom:4px;"><?= $lbl ?> starts at LL</label>
+                        <input type="number" name="grade_<?= $val ?>_threshold" value="<?= $thr ?>"
+                            min="0" step="500000" form="settingsForm"
+                            style="width:100%;padding:8px 10px;border:2px solid <?= $col ?>44;border-radius:8px;font-size:13px;font-weight:700;">
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <div style="font-size:11px;color:#9ca3af;margin-top:6px;">Grade upgrades automatically when a loyalty customer's total spending crosses these thresholds.</div>
+            </div>
+
+            <!-- Per-grade earn rates -->
+            <div style="margin-bottom:16px;border-top:1px solid #f0f2f5;padding-top:16px;">
+                <label style="display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px;">
+                    &#128176; Per-Grade Earn Rate (Cashback % or Points per LL 1,000)
+                </label>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">
+                    <?php foreach([['Regular','regular','#9E9E9E',$rr],['Gold','gold','#F59E0B',$rg],['Platinum','platinum','#6366F1',$rp],['Premium','premium','#EC4899',$rpm]] as [$lbl,$val,$col,$rate]): ?>
+                    <div>
+                        <label style="display:block;font-size:11px;font-weight:700;color:<?= $col ?>;margin-bottom:4px;"><?= $lbl ?></label>
+                        <input type="number" name="loyalty_rate_<?= $val ?>" value="<?= $rate ?>"
+                            min="0" max="50" step="0.1" form="settingsForm"
+                            style="width:100%;padding:8px 10px;border:2px solid <?= $col ?>44;border-radius:8px;font-size:13px;font-weight:700;">
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+
+            <!-- Minimum grade to redeem + inactivity -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;border-top:1px solid #f0f2f5;padding-top:16px;">
+                <div>
+                    <label style="display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px;">
+                        &#128274; Minimum Grade to Redeem
+                    </label>
+                    <select name="loyalty_min_grade" form="settingsForm"
+                        style="width:100%;padding:9px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;font-weight:700;">
+                        <?php foreach(['regular'=>'Regular','gold'=>'Gold','platinum'=>'Platinum','premium'=>'Premium'] as $v=>$l): ?>
+                        <option value="<?= $v ?>" <?= $lmingrd===$v?'selected':'' ?>><?= $l ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:4px;">Customers below this grade can earn but cannot redeem.</div>
+                </div>
+                <div>
+                    <label style="display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px;">
+                        &#9201; Inactivity Warning (Days)
+                    </label>
+                    <input type="number" name="loyalty_inactivity_days" value="<?= $lrinact ?>"
+                        min="30" step="30" form="settingsForm"
+                        style="width:100%;padding:9px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;font-weight:700;">
+                    <div style="font-size:11px;color:#9ca3af;margin-top:4px;">Clients inactive longer than this appear in the Inactive Clients tab.</div>
+                </div>
+            </div>
+
+            </div><!-- /tier settings -->
 
             <!-- Universal key card — cashback only -->
             <div style="border-top:1px solid #f0f2f5;padding-top:16px;margin-top:4px;">

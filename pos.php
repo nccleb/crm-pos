@@ -1340,13 +1340,17 @@ function loadClientHistory(clientId) {
                 }).join(', ');
                 if (sale.items.length === 5) itemsStr += '\u2026';
                 var statusCol = sale.status === 'refunded' ? '#ef4444' : '#10b981';
+                var payLabels = {cash:'Cash',card:'Card',omt:'OMT',whish:'Whish',
+                    bank_transfer:'Bank Transfer',cheque:'Cheque',credit:'Credit'};
+                var payLabel = payLabels[sale.payment_method] || sale.payment_method || '—';
+                var totalLbp = Math.round(parseInt(sale.total, 10) || 0);
                 html += '<div class="ch-sale">' +
                     '<div class="ch-sale-header">' +
                     '<span class="ch-sale-id">Sale #' + sale.id +
                         ' <span style="color:' + statusCol + ';text-transform:uppercase;font-size:10px;">' + sale.status + '</span></span>' +
-                    '<span class="ch-sale-total">LL ' + Math.round(sale.total_with_vat).toLocaleString() + '</span>' +
+                    '<span class="ch-sale-total">LL ' + totalLbp.toLocaleString() + '</span>' +
                     '</div>' +
-                    '<div class="ch-sale-date">' + dateStr + ' &nbsp;&middot;&nbsp; ' + sale.payment_method + '</div>' +
+                    '<div class="ch-sale-date">' + dateStr + ' &nbsp;&middot;&nbsp; ' + payLabel + '</div>' +
                     (itemsStr ? '<div class="ch-sale-items">' + itemsStr + '</div>' : '') +
                     '</div>';
             });

@@ -108,14 +108,25 @@ switch ($action) {
         // Get exchange rate AND VAT rate AND loyalty settings
         $co_rate    = mysqli_fetch_assoc(mysqli_query($conn,
             "SELECT usd_to_lbp, vat_rate, loyalty_mode, loyalty_rate,
-                    loyalty_point_value, loyalty_min_redeem
+                    loyalty_point_value, loyalty_min_redeem, loyalty_min_grade,
+                    loyalty_rate_regular, loyalty_rate_gold,
+                    loyalty_rate_platinum, loyalty_rate_premium,
+                    grade_gold_threshold, grade_platinum_threshold, grade_premium_threshold
              FROM company_settings LIMIT 1"));
-        $usd_to_lbp   = (float)($co_rate['usd_to_lbp']         ?? 89500);
-        $vat_rate     = (float)($co_rate['vat_rate']            ?? 0);
-        $loyalty_mode = $co_rate['loyalty_mode']                ?? 'disabled';
-        $loyalty_rate = (float)($co_rate['loyalty_rate']        ?? 2.00);
-        $point_value  = (int)($co_rate['loyalty_point_value']   ?? 1000);
-        $min_redeem   = (int)($co_rate['loyalty_min_redeem']    ?? 5000);
+        $usd_to_lbp        = (float)($co_rate['usd_to_lbp']              ?? 89500);
+        $vat_rate          = (float)($co_rate['vat_rate']                 ?? 0);
+        $loyalty_mode      = $co_rate['loyalty_mode']                     ?? 'disabled';
+        $loyalty_rate      = (float)($co_rate['loyalty_rate']             ?? 2.00);
+        $point_value       = (int)($co_rate['loyalty_point_value']        ?? 1000);
+        $min_redeem        = (int)($co_rate['loyalty_min_redeem']         ?? 5000);
+        $loyalty_min_grade = $co_rate['loyalty_min_grade']                ?? 'gold';
+        $rate_regular      = (float)($co_rate['loyalty_rate_regular']     ?? $loyalty_rate);
+        $rate_gold         = (float)($co_rate['loyalty_rate_gold']        ?? $loyalty_rate);
+        $rate_platinum     = (float)($co_rate['loyalty_rate_platinum']    ?? $loyalty_rate);
+        $rate_premium      = (float)($co_rate['loyalty_rate_premium']     ?? $loyalty_rate);
+        $thr_gold          = (int)($co_rate['grade_gold_threshold']       ?? 5000000);
+        $thr_platinum      = (int)($co_rate['grade_platinum_threshold']   ?? 15000000);
+        $thr_premium       = (int)($co_rate['grade_premium_threshold']    ?? 30000000);
 
         if (empty($items)) {
             echo json_encode(['success' => false, 'error' => 'No items in sale']);
@@ -209,20 +220,34 @@ switch ($action) {
         if ($loyalty_client_id && $loyalty_mode !== 'disabled') {
             require_once dirname(__FILE__) . '/pos_log.php';
 
-            // Fetch fresh client balance
+            // Fetch fresh client data including grade
             $lc = mysqli_fetch_assoc(mysqli_query($conn,
                 "SELECT wallet_balance, loyalty_points, total_spent,
-                        nom, prenom, company
+                        nom, prenom, company, grade
                  FROM client WHERE id = $loyalty_client_id LIMIT 1"));
             $lc_name = mysqli_real_escape_string($conn,
                 trim(($lc['prenom']??'').' '.($lc['nom']??'')) ?: ($lc['company']??''));
-            $auth_esc = mysqli_real_escape_string($conn, $loyalty_auth_method);
+            $auth_esc    = mysqli_real_escape_string($conn, $loyalty_auth_method);
+            $client_grade = $lc['grade'] ?? 'regular';
+
+            // Pick earn rate for this client's grade
+            $grade_rate = match($client_grade) {
+                'gold'     => $rate_gold,
+                'platinum' => $rate_platinum,
+                'premium'  => $rate_premium,
+                default    => $rate_regular,
+            };
 
             // In cashback mode — card (or supervisor override) required to earn AND redeem
             // In points mode — phone_only is sufficient for both
             $can_earn = ($loyalty_mode === 'points')
                      || ($loyalty_auth_method === 'card')
                      || ($loyalty_auth_method === 'supervisor_override');
+
+            // ── Grade eligibility order: regular < gold < platinum < premium ──
+            $grade_order = ['regular'=>0,'gold'=>1,'platinum'=>2,'premium'=>3];
+            $min_grade_order = $grade_order[$loyalty_min_grade] ?? 1;
+            $client_grade_order = $grade_order[$client_grade] ?? 0;
 
             if ($loyalty_mode === 'cashback') {
 
@@ -247,16 +272,30 @@ switch ($action) {
 
                 // 2. EARN cashback on the amount actually paid (not the wallet portion)
                 if ($can_earn) {
-                    $earn_base   = $final_total_lbp; // earn on cash paid, not on wallet used
-                    $earned_lbp  = (int)round($earn_base * $loyalty_rate / 100);
-                    $earned_lbp  = (int)(floor($earned_lbp / 1000) * 1000); // round down to LL 1,000
+                    $earn_base   = $final_total_lbp;
+                    $earned_lbp  = (int)round($earn_base * $grade_rate / 100);
+                    $earned_lbp  = (int)(floor($earned_lbp / 1000) * 1000);
                     if ($earned_lbp > 0) {
                         $bal_before = (int)$lc['wallet_balance'];
                         $bal_after  = $bal_before + $earned_lbp;
+                        $new_total_spent = (int)$lc['total_spent'] + $final_total_lbp;
+
+                        // Auto grade upgrade
+                        $new_grade = $client_grade;
+                        if      ($new_total_spent >= $thr_premium)  $new_grade = 'premium';
+                        elseif  ($new_total_spent >= $thr_platinum) $new_grade = 'platinum';
+                        elseif  ($new_total_spent >= $thr_gold)     $new_grade = 'gold';
+                        else                                         $new_grade = 'regular';
+
+                        $grade_sql = ($new_grade !== $client_grade)
+                            ? ", grade = '$new_grade'" : '';
+
                         mysqli_query($conn,
                             "UPDATE client SET
-                             wallet_balance = $bal_after,
-                             total_spent    = total_spent + $final_total_lbp
+                             wallet_balance    = $bal_after,
+                             total_spent       = $new_total_spent,
+                             last_purchase_date = CURDATE()
+                             $grade_sql
                              WHERE id = $loyalty_client_id");
                         mysqli_query($conn,
                             "INSERT INTO pos_loyalty_transactions
@@ -266,9 +305,16 @@ switch ($action) {
                              VALUES ($loyalty_client_id, '$lc_name', $sale_id, 'earned', 'cashback',
                                      $earned_lbp, $bal_before, $bal_after,
                                      '$auth_esc', $loyalty_supervisor_ovr,
-                                     $agent_id, '$agent_name', 'Cashback on Sale #$sale_id')");
+                                     $agent_id, '$agent_name', 'Cashback on Sale #$sale_id ($client_grade rate: {$grade_rate}%)')");
                         $loyalty_earned        = $earned_lbp;
                         $loyalty_balance_after = $bal_after;
+
+                        if ($new_grade !== $client_grade) {
+                            posLog($conn, $agent_id, $agent_name, 'grade_upgraded',
+                                "$lc_name upgraded from $client_grade to $new_grade (total spent: LL " . number_format($new_total_spent) . ")",
+                                $loyalty_client_id, 'client');
+                            $grade_upgraded = $new_grade;
+                        }
                     }
                 }
 
@@ -295,14 +341,28 @@ switch ($action) {
 
                 // 2. EARN points — rate = points per LL 1,000 spent
                 $earn_base    = $final_total_lbp;
-                $earned_pts   = (int)floor(($earn_base / 1000) * $loyalty_rate);
+                $earned_pts   = (int)floor(($earn_base / 1000) * $grade_rate);
                 if ($earned_pts > 0) {
-                    $pts_before = (int)$lc['loyalty_points'];
-                    $pts_after  = $pts_before + $earned_pts;
+                    $pts_before      = (int)$lc['loyalty_points'];
+                    $pts_after       = $pts_before + $earned_pts;
+                    $new_total_spent = (int)$lc['total_spent'] + $final_total_lbp;
+
+                    // Auto grade upgrade
+                    $new_grade = $client_grade;
+                    if      ($new_total_spent >= $thr_premium)  $new_grade = 'premium';
+                    elseif  ($new_total_spent >= $thr_platinum) $new_grade = 'platinum';
+                    elseif  ($new_total_spent >= $thr_gold)     $new_grade = 'gold';
+                    else                                         $new_grade = 'regular';
+
+                    $grade_sql = ($new_grade !== $client_grade)
+                        ? ", grade = '$new_grade'" : '';
+
                     mysqli_query($conn,
                         "UPDATE client SET
-                         loyalty_points = $pts_after,
-                         total_spent    = total_spent + $final_total_lbp
+                         loyalty_points     = $pts_after,
+                         total_spent        = $new_total_spent,
+                         last_purchase_date = CURDATE()
+                         $grade_sql
                          WHERE id = $loyalty_client_id");
                     mysqli_query($conn,
                         "INSERT INTO pos_loyalty_transactions
@@ -312,9 +372,16 @@ switch ($action) {
                          VALUES ($loyalty_client_id, '$lc_name', $sale_id, 'earned', 'points',
                                  $earned_pts, $pts_before, $pts_after,
                                  '$auth_esc', $loyalty_supervisor_ovr,
-                                 $agent_id, '$agent_name', 'Points earned on Sale #$sale_id')");
+                                 $agent_id, '$agent_name', 'Points earned on Sale #$sale_id ($client_grade rate: {$grade_rate})')");
                     $loyalty_earned        = $earned_pts;
                     $loyalty_balance_after = $pts_after;
+
+                    if ($new_grade !== $client_grade) {
+                        posLog($conn, $agent_id, $agent_name, 'grade_upgraded',
+                            "$lc_name upgraded from $client_grade to $new_grade (total spent: LL " . number_format($new_total_spent) . ")",
+                            $loyalty_client_id, 'client');
+                        $grade_upgraded = $new_grade;
+                    }
                 }
             }
         }
@@ -350,6 +417,8 @@ switch ($action) {
             'loyalty_redeemed'         => $loyalty_redeemed_display,
             'loyalty_balance_after'    => $loyalty_balance_after,
             'loyalty_mode'             => $loyalty_mode,
+            'loyalty_client_id'        => $loyalty_client_id,
+            'grade_upgraded'           => $grade_upgraded ?? null,
             'print_result'             => $print_result,
             'drawer_result'            => $drawer_result,
         ]);
@@ -366,8 +435,56 @@ switch ($action) {
         $items_res = mysqli_query($conn, "SELECT * FROM pos_sale_items WHERE sale_id = $sale_id");
         $items = [];
         while ($i = mysqli_fetch_assoc($items_res)) $items[] = $i;
-        // Include agent_id so frontend can check self-void eligibility
         echo json_encode(['success' => true, 'sale' => $sale, 'items' => $items]);
+        break;
+
+    // ── Get client purchase history ────────────────────────────────────────
+    case 'get_client_history':
+        $client_id = (int)($_GET['client_id'] ?? 0);
+        if (!$client_id) { echo json_encode(['success' => false, 'error' => 'No client']); break; }
+
+        $co_h = mysqli_fetch_assoc(mysqli_query($conn, "SELECT vat_rate FROM company_settings LIMIT 1"));
+        $vat_h = (float)($co_h['vat_rate'] ?? 0);
+        $vat_mult_h = 1 + $vat_h / 100;
+
+        // Last 10 completed sales for this client
+        $sales_res = mysqli_query($conn,
+            "SELECT id, created_at, status,
+                    ROUND(ROUND(final_total * $vat_mult_h / 5000) * 5000) AS total_lbp,
+                    payment_method
+             FROM pos_sales
+             WHERE client_id = $client_id AND status IN ('completed','pending','refunded')
+             ORDER BY created_at DESC LIMIT 10");
+
+        $sales = [];
+        while ($s = mysqli_fetch_assoc($sales_res)) {
+            // Fetch items for this sale
+            $items_r = mysqli_query($conn,
+                "SELECT product_name, qty FROM pos_sale_items WHERE sale_id = {$s['id']}");
+            $items_h = [];
+            while ($it = mysqli_fetch_assoc($items_r)) $items_h[] = $it;
+            $sales[] = [
+                'id'             => $s['id'],
+                'date'           => $s['created_at'],
+                'total'          => (int)$s['total_lbp'],
+                'payment_method' => $s['payment_method'],
+                'status'         => $s['status'],
+                'items'          => $items_h,
+            ];
+        }
+
+        // Summary
+        $sum = mysqli_fetch_assoc(mysqli_query($conn,
+            "SELECT COUNT(*) AS count,
+                    SUM(ROUND(ROUND(final_total * $vat_mult_h / 5000) * 5000)) AS total
+             FROM pos_sales
+             WHERE client_id = $client_id AND status IN ('completed','pending')"));
+
+        echo json_encode([
+            'success' => true,
+            'sales'   => $sales,
+            'summary' => ['count' => (int)$sum['count'], 'total' => (int)$sum['total']],
+        ]);
         break;
 
     // ── Manual restock / adjustment ────────────────────────────────────────

@@ -227,6 +227,7 @@ tbody td{padding:10px 12px;font-size:13px;vertical-align:middle}
 <div class="tabs">
     <button class="tab-btn active" onclick="switchTab('clients')">&#128101; Enrolled Clients</button>
     <button class="tab-btn" onclick="switchTab('transactions')">&#128203; Transaction Log</button>
+    <button class="tab-btn" onclick="switchTab('inactive')">&#9201; Inactive Clients</button>
     <?php if($is_super):?>
     <button class="tab-btn" onclick="switchTab('settings')">&#9881; Settings</button>
     <?php endif;?>
@@ -258,6 +259,8 @@ tbody td{padding:10px 12px;font-size:13px;vertical-align:middle}
                             <th>Customer</th>
                             <th>Phone</th>
                             <th>Card #</th>
+                            <th>Grade</th>
+                            <th>Redeem</th>
                             <th><?= $loyalty_mode==='points' ? 'Points' : 'Wallet Balance' ?></th>
                             <th>Total Spent</th>
                             <th>Enrolled</th>
@@ -418,6 +421,38 @@ tbody td{padding:10px 12px;font-size:13px;vertical-align:middle}
 </div>
 <?php endif;?>
 
+<!-- ── TAB: Inactive Clients ──────────────────────────────────────────────── -->
+<div class="tab-panel" id="tab-inactive">
+    <div class="panel">
+        <div class="panel-header">
+            <h2>&#9201; Inactive Clients</h2>
+            <span id="inactive-threshold-label" style="font-size:12px;color:#9E9E9E;"></span>
+        </div>
+        <div class="panel-body">
+            <div id="inactive-note" class="warn-box" style="display:none;"></div>
+            <div class="tbl-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Phone</th>
+                            <th>Grade</th>
+                            <th>Last Purchase</th>
+                            <th>Inactive For</th>
+                            <th><?= $loyalty_mode==='points' ? 'Points' : 'Wallet' ?></th>
+                            <th>Total Spent</th>
+                            <?php if($is_super):?><th>Action</th><?php endif;?>
+                        </tr>
+                    </thead>
+                    <tbody id="inactive-tbody">
+                        <tr><td colspan="8" style="text-align:center;color:#9E9E9E;padding:24px">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
 </div><!-- /container -->
 
 <!-- ── Enroll Modal ─────────────────────────────────────────────────────────── -->
@@ -489,10 +524,9 @@ let enrollClientId   = null;
 let enrollClientName = '';
 let generatedCard    = '';
 
-// ── Tab switching ──────────────────────────────────────────────────────────────
 function switchTab(name) {
     document.querySelectorAll('.tab-btn').forEach((b,i) => {
-        const panels = ['clients','transactions','settings'];
+        const panels = ['clients','transactions','inactive','settings'];
         b.classList.toggle('active', panels[i] === name);
     });
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -500,6 +534,65 @@ function switchTab(name) {
     if (panel) panel.classList.add('active');
     if (name === 'clients')      loadClients();
     if (name === 'transactions') loadTransactions();
+    if (name === 'inactive')     loadInactive();
+}
+
+function loadInactive() {
+    fetch('ajax/pos_loyalty_ajax.php?action=get_inactive')
+        .then(r => r.json()).then(data => {
+        const tbody = document.getElementById('inactive-tbody');
+        const label = document.getElementById('inactive-threshold-label');
+        const note  = document.getElementById('inactive-note');
+        if (label) label.textContent = `Threshold: ${data.threshold_days} days since last purchase`;
+        if (!data.clients || !data.clients.length) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#2E7D32;padding:24px">
+                &#10003; No inactive loyalty clients found</td></tr>`;
+            if (note) note.style.display = 'none';
+            return;
+        }
+        if (note) {
+            note.style.display = '';
+            note.textContent = `${data.clients.length} loyalty client(s) have not purchased in over ${data.threshold_days} days. Review for demotion or re-engagement.`;
+        }
+        const gradeColors = {regular:'#9E9E9E', gold:'#F59E0B', platinum:'#6366F1', premium:'#EC4899'};
+        tbody.innerHTML = data.clients.map(c => {
+            const name  = [c.prenom, c.nom].filter(Boolean).join(' ') || c.company || '—';
+            const grade = c.grade || 'regular';
+            const gcol  = gradeColors[grade] || '#9E9E9E';
+            const gradeBadge = `<span class="badge" style="background:${gcol}22;color:${gcol};">${grade.charAt(0).toUpperCase()+grade.slice(1)}</span>`;
+            const bal   = LOYALTY_MODE === 'points'
+                        ? Number(c.loyalty_points).toLocaleString() + ' pts'
+                        : 'LL ' + Number(c.wallet_balance).toLocaleString();
+            const demoteBtn = IS_SUPER && grade !== 'regular'
+                ? `<button class="btn btn-danger btn-sm" onclick="demoteClient(${c.id},'${name.replace(/'/g,"\\'")}','${grade}')">Demote</button>`
+                : '—';
+            return `<tr>
+                <td><b>${name}</b></td>
+                <td>${c.number || '—'}</td>
+                <td>${gradeBadge}</td>
+                <td>${c.last_purchase_date || '—'}</td>
+                <td><b style="color:#C62828;">${c.days_inactive} days</b></td>
+                <td>${bal}</td>
+                <td>LL ${Number(c.total_spent).toLocaleString()}</td>
+                ${IS_SUPER ? `<td>${demoteBtn}</td>` : ''}
+            </tr>`;
+        }).join('');
+    });
+}
+
+function demoteClient(id, name, currentGrade) {
+    const grades = ['regular','gold','platinum','premium'];
+    const idx    = grades.indexOf(currentGrade);
+    const target = idx > 0 ? grades[idx-1] : 'regular';
+    if (!confirm(`Demote ${name} from ${currentGrade} to ${target}?`)) return;
+    fetch('ajax/pos_loyalty_ajax.php', {
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body: `action=set_grade&client_id=${id}&grade=${target}`
+    }).then(r => r.json()).then(data => {
+        if (data.success) { toast(`${name} demoted to ${target}`); loadInactive(); loadClients(); }
+        else toast(data.error, false);
+    });
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
@@ -522,17 +615,26 @@ function loadClients(q='') {
         if (!data.success) return;
         const tbody = document.getElementById('clients-tbody');
         if (!data.clients.length) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#9E9E9E;padding:24px">
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#9E9E9E;padding:24px">
                 No enrolled clients found</td></tr>`;
             return;
         }
-        const unitLabel = LOYALTY_MODE === 'points' ? 'pts' : 'LL';
+        const minGrade = data.settings ? (data.settings.loyalty_min_grade || 'gold') : 'gold';
+        const gradeOrder = {regular:0, gold:1, platinum:2, premium:3};
+        const gradeColors = {regular:'#9E9E9E', gold:'#F59E0B', platinum:'#6366F1', premium:'#EC4899'};
         tbody.innerHTML = data.clients.map(c => {
             const name   = [c.prenom, c.nom].filter(Boolean).join(' ') || c.company || '—';
             const bal    = LOYALTY_MODE === 'points'
                          ? Number(c.loyalty_points).toLocaleString() + ' pts'
                          : 'LL ' + Number(c.wallet_balance).toLocaleString();
             const enroll = c.loyalty_enrolled ? c.loyalty_enrolled.substring(0,10) : '—';
+            const grade  = c.grade || 'regular';
+            const gcol   = gradeColors[grade] || '#9E9E9E';
+            const gradeBadge = `<span class="badge" style="background:${gcol}22;color:${gcol};">${grade.charAt(0).toUpperCase()+grade.slice(1)}</span>`;
+            const canRedeem  = (gradeOrder[grade]||0) >= (gradeOrder[minGrade]||1);
+            const redeemBadge = canRedeem
+                ? '<span class="badge badge-green">&#10003; Yes</span>'
+                : `<span class="badge badge-grey">&#128274; ${minGrade.charAt(0).toUpperCase()+minGrade.slice(1)}+</span>`;
             const actions = IS_SUPER ? `
                 <button class="btn btn-outline btn-sm" onclick='openAdjust(${c.id},"${name.replace(/'/g,"\\'")}",${c.wallet_balance},${c.loyalty_points})'>Adjust</button>
                 <button class="btn btn-danger btn-sm" onclick="revokeCard(${c.id},'${c.loyalty_card}')">Revoke</button>
@@ -541,6 +643,8 @@ function loadClients(q='') {
                 <td><b>${name}</b></td>
                 <td>${c.number || '—'}</td>
                 <td><span class="lcard has-card">${c.loyalty_card}</span></td>
+                <td>${gradeBadge}</td>
+                <td>${redeemBadge}</td>
                 <td><b>${bal}</b></td>
                 <td>LL ${Number(c.total_spent).toLocaleString()}</td>
                 <td>${enroll}</td>
