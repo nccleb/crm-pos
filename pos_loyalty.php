@@ -41,6 +41,15 @@ $today_txns = mysqli_fetch_assoc(mysqli_query($conn,
      FROM pos_loyalty_transactions WHERE DATE(created_at) = CURDATE()"));
 
 mysqli_close($conn);
+
+// ── Abbreviate large numbers for stat cards ───────────────────────────────────
+function abbr($n, $prefix='') {
+    $n = (float)$n;
+    if ($n >= 1_000_000_000) return $prefix . number_format($n / 1_000_000_000, 1) . 'B';
+    if ($n >= 1_000_000)     return $prefix . number_format($n / 1_000_000, 1)     . 'M';
+    if ($n >= 10_000)        return $prefix . number_format($n / 1_000, 1)          . 'K';
+    return $prefix . number_format((int)$n);
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -189,17 +198,17 @@ tbody td{padding:10px 12px;font-size:13px;vertical-align:middle}
     </div>
     <?php if($loyalty_mode === 'cashback'):?>
     <div class="stat-card green">
-        <div class="val">LL <?= number_format((int)$totals['total_wallet']) ?></div>
+        <div class="val"><?= abbr((int)$totals['total_wallet'], 'LL ') ?></div>
         <div class="lbl">Total Wallet Balance</div>
     </div>
     <?php elseif($loyalty_mode === 'points'):?>
     <div class="stat-card green">
-        <div class="val"><?= number_format((int)$totals['total_points']) ?></div>
+        <div class="val"><?= abbr((int)$totals['total_points']) ?> pts</div>
         <div class="lbl">Total Points in System</div>
     </div>
     <?php endif;?>
     <div class="stat-card">
-        <div class="val">LL <?= number_format((int)$totals['total_spent']) ?></div>
+        <div class="val"><?= abbr((int)$totals['total_spent'], 'LL ') ?></div>
         <div class="lbl">Total Lifetime Spending</div>
     </div>
     <div class="stat-card amber">
@@ -207,12 +216,12 @@ tbody td{padding:10px 12px;font-size:13px;vertical-align:middle}
         <div class="lbl">Today's Transactions</div>
     </div>
     <div class="stat-card green">
-        <div class="val"><?= number_format((int)$today_txns['earned']) ?></div>
+        <div class="val"><?= abbr((int)$today_txns['earned']) ?></div>
         <div class="lbl">Today's Earned
             <?= $loyalty_mode==='points' ? 'pts' : 'LL' ?></div>
     </div>
     <div class="stat-card red">
-        <div class="val"><?= number_format((int)$today_txns['redeemed']) ?></div>
+        <div class="val"><?= abbr((int)$today_txns['redeemed']) ?></div>
         <div class="lbl">Today's Redeemed</div>
     </div>
     <div class="stat-card">
