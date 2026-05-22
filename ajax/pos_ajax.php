@@ -57,8 +57,7 @@ switch ($action) {
             $res = mysqli_query($conn,
                 "SELECT codep, nomp, price, onhand, unit, category, image, barcode
                  FROM produit WHERE active = 1 $cat_sql
-                 ORDER BY nomp LIMIT 500"
-            );
+                 ORDER BY nomp LIMIT 500");
         } else {
             $q = '%' . mysqli_real_escape_string($conn, $raw) . '%';
             $res = mysqli_query($conn,
@@ -66,8 +65,7 @@ switch ($action) {
                  FROM produit
                  WHERE active = 1 $cat_sql
                  AND (nomp LIKE '$q' OR barcode LIKE '$q')
-                 ORDER BY nomp LIMIT 500"
-            );
+                 ORDER BY nomp LIMIT 500");
         }
         $products = [];
         while ($r = mysqli_fetch_assoc($res)) $products[] = $r;
@@ -104,6 +102,8 @@ switch ($action) {
         $loyalty_use_wallet     = (int)($_POST['loyalty_use_wallet']  ?? 0); // LBP amount to redeem
         $loyalty_use_points     = (int)($_POST['loyalty_use_points']  ?? 0); // points to redeem
         $loyalty_supervisor_ovr = !empty($_POST['loyalty_supervisor_override']) ? 1 : 0;
+        // Catalogue redemptions — [{cart_idx, product_id, points_cost, qty}]
+        $catalogue_redemptions  = json_decode($_POST['catalogue_redemptions'] ?? '[]', true) ?: [];
 
         // Get exchange rate AND VAT rate AND loyalty settings
         $co_rate    = mysqli_fetch_assoc(mysqli_query($conn,
@@ -320,26 +320,40 @@ switch ($action) {
 
             } elseif ($loyalty_mode === 'points') {
 
-                // 1. REDEEM points if requested
-                if ($loyalty_discount_lbp > 0 && $loyalty_use_points > 0) {
-                    $pts_before = (int)$lc['loyalty_points'];
-                    $pts_after  = max(0, $pts_before - $loyalty_use_points);
-                    mysqli_query($conn,
-                        "UPDATE client SET loyalty_points = $pts_after WHERE id = $loyalty_client_id");
-                    mysqli_query($conn,
-                        "INSERT INTO pos_loyalty_transactions
-                         (client_id, client_name, sale_id, type, mode, amount,
-                          balance_before, balance_after, auth_method, supervisor_override,
-                          agent_id, agent_name, note)
-                         VALUES ($loyalty_client_id, '$lc_name', $sale_id, 'redeemed', 'points',
-                                 $loyalty_use_points, $pts_before, $pts_after,
-                                 '$auth_esc', $loyalty_supervisor_ovr,
-                                 $agent_id, '$agent_name', 'Points redeemed on Sale #$sale_id')");
-                    $loyalty_redeemed_display = $loyalty_use_points;
-                    $lc['loyalty_points'] = $pts_after;
+                // 1. CATALOGUE REDEMPTIONS — per-item points deduction
+                $total_catalogue_pts = 0;
+                if (!empty($catalogue_redemptions)) {
+                    $pts_before_cat = (int)$lc['loyalty_points'];
+                    foreach ($catalogue_redemptions as $cr) {
+                        $cr_pts = (int)($cr['points_cost'] ?? 0);
+                        $cr_qty = (int)($cr['qty']         ?? 1);
+                        $total_catalogue_pts += $cr_pts * $cr_qty;
+                    }
+                    $total_catalogue_pts = min($total_catalogue_pts, $pts_before_cat);
+                    if ($total_catalogue_pts > 0) {
+                        $pts_after_cat = max(0, $pts_before_cat - $total_catalogue_pts);
+                        mysqli_query($conn,
+                            "UPDATE client SET loyalty_points = $pts_after_cat WHERE id = $loyalty_client_id");
+                        // Build readable note
+                        $cat_items = implode(', ', array_map(fn($cr) =>
+                            "{$cr['product_name']} x{$cr['qty']} ({$cr['points_cost']} pts each)",
+                            $catalogue_redemptions));
+                        mysqli_query($conn,
+                            "INSERT INTO pos_loyalty_transactions
+                             (client_id, client_name, sale_id, type, mode, amount,
+                              balance_before, balance_after, auth_method, supervisor_override,
+                              agent_id, agent_name, note)
+                             VALUES ($loyalty_client_id, '$lc_name', $sale_id, 'redeemed', 'points',
+                                     $total_catalogue_pts, $pts_before_cat, $pts_after_cat,
+                                     '$auth_esc', $loyalty_supervisor_ovr,
+                                     $agent_id, '$agent_name',
+                                     'Catalogue: $cat_items — Sale #$sale_id')");
+                        $loyalty_redeemed_display = $total_catalogue_pts;
+                        $lc['loyalty_points']     = $pts_after_cat;
+                    }
                 }
 
-                // 2. EARN points — rate = points per LL 1,000 spent
+                // 2. EARN points on the paid amount (catalogue items excluded — they were free)
                 $earn_base    = $final_total_lbp;
                 $earned_pts   = (int)floor(($earn_base / 1000) * $grade_rate);
                 if ($earned_pts > 0) {

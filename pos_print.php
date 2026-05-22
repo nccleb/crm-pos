@@ -181,8 +181,9 @@ body {
     </thead>
     <tbody>
     <?php foreach ($items as $item):
-        $unit_lbp = round((float)$item['unit_price']);
-        $item_lbp = round((float)$item['subtotal']);
+        $unit_lbp    = round((float)$item['unit_price']);
+        $item_lbp    = round((float)$item['subtotal']);
+        $is_redeemed = !empty($item['redeemed_with_points']) || ($unit_lbp === 0 && !empty($item['redeemable']));
         // Show weight for weighted items
         $qty_display = (float)$item['qty'];
         $qty_str = ($qty_display != intval($qty_display))
@@ -190,10 +191,10 @@ body {
             : number_format($qty_display, 0);
     ?>
     <tr>
-        <td><?= htmlspecialchars($item['product_name']) ?></td>
+        <td><?= htmlspecialchars($item['product_name']) ?><?= $is_redeemed ? ' <span style="color:#D97706;font-size:10px;font-weight:700;">&#11088;</span>' : '' ?></td>
         <td class="c"><?= $qty_str ?></td>
-        <td class="r">LL <?= number_format($unit_lbp, 0) ?></td>
-        <td class="r">LL <?= number_format($item_lbp, 0) ?></td>
+        <td class="r"><?= $is_redeemed ? '<span style="color:#D97706;font-weight:700;">FREE</span>' : 'LL '.number_format($unit_lbp,0) ?></td>
+        <td class="r"><?= $is_redeemed ? '<span style="color:#D97706;font-weight:700;">FREE</span>' : 'LL '.number_format($item_lbp,0) ?></td>
     </tr>
     <?php endforeach; ?>
     </tbody>

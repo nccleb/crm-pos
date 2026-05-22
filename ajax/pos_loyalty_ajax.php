@@ -423,6 +423,41 @@ switch ($action) {
         echo json_encode(['success' => true]);
         break;
 
+    // ── Redemption Catalogue ──────────────────────────────────────────────────
+    case 'get_catalogue':
+        $q   = trim($_GET['q'] ?? '');
+        $rdm = $_GET['redeemable'] ?? '';
+        $where_cat = 'WHERE active = 1';
+        if ($q)   $where_cat .= " AND nomp LIKE '%" . mysqli_real_escape_string($conn, $q) . "%'";
+        if ($rdm) $where_cat .= ' AND redeemable = 1';
+        $res = mysqli_query($conn,
+            "SELECT codep, nomp, price, category, redeemable, points_price
+             FROM produit $where_cat
+             ORDER BY redeemable DESC, nomp ASC LIMIT 200");
+        $products = [];
+        while ($r = mysqli_fetch_assoc($res)) $products[] = $r;
+        echo json_encode(['success' => true, 'products' => $products]);
+        break;
+
+    case 'save_catalogue':
+        if (!$is_super) { echo json_encode(['success'=>false,'error'=>'Super only']); break; }
+        $pid        = (int)($_POST['product_id'] ?? 0);
+        $redeemable = (int)($_POST['redeemable'] ?? 0);
+        $pts        = !empty($_POST['points_price']) ? (int)$_POST['points_price'] : 'NULL';
+        if (!$pid) { echo json_encode(['success'=>false,'error'=>'No product']); break; }
+        mysqli_query($conn,
+            "UPDATE produit SET redeemable = $redeemable, points_price = $pts
+             WHERE codep = $pid");
+        // Get product name for log
+        $prow = mysqli_fetch_assoc(mysqli_query($conn,
+            "SELECT nomp FROM produit WHERE codep = $pid LIMIT 1"));
+        require_once dirname(__FILE__) . '/pos_log.php';
+        posLog($conn, $agent_id, $agent_name, 'catalogue_updated',
+            ($prow['nomp'] ?? "Product #$pid") . " — redeemable=$redeemable, points_price=$pts",
+            $pid, 'product');
+        echo json_encode(['success' => true]);
+        break;
+
     // ── Inactive clients ───────────────────────────────────────────────────────
     case 'get_inactive':
         $settings = getLoyaltySettings($conn);

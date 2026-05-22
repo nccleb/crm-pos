@@ -237,6 +237,7 @@ tbody td{padding:10px 12px;font-size:13px;vertical-align:middle}
     <button class="tab-btn active" onclick="switchTab('clients')">&#128101; Enrolled Clients</button>
     <button class="tab-btn" onclick="switchTab('transactions')">&#128203; Transaction Log</button>
     <button class="tab-btn" onclick="switchTab('inactive')">&#9201; Inactive Clients</button>
+    <button class="tab-btn" onclick="switchTab('catalogue')">&#11088; Redemption Catalogue</button>
     <?php if($is_super):?>
     <button class="tab-btn" onclick="switchTab('settings')">&#9881; Settings</button>
     <?php endif;?>
@@ -462,6 +463,48 @@ tbody td{padding:10px 12px;font-size:13px;vertical-align:middle}
     </div>
 </div>
 
+<!-- ── TAB: Redemption Catalogue ─────────────────────────────────────────── -->
+<div class="tab-panel" id="tab-catalogue">
+    <div class="panel">
+        <div class="panel-header">
+            <h2>&#11088; Redemption Catalogue</h2>
+            <div style="font-size:12px;color:#9E9E9E;">Products customers can claim free using points (Points mode only)</div>
+        </div>
+        <div class="panel-body">
+            <?php if($loyalty_mode !== 'points'): ?>
+            <div class="warn-box">&#9888; Redemption Catalogue is only available in Points mode. Switch loyalty mode in Settings.</div>
+            <?php else: ?>
+            <div class="info-box">&#8505; Set a points price on any product to add it to the catalogue. Customers with enough points see a "Redeem" button on that item in their cart.</div>
+            <div class="search-bar">
+                <input type="text" id="cat-search" placeholder="Search products..." oninput="searchCatalogue()">
+                <select id="cat-filter">
+                    <option value="all">All Products</option>
+                    <option value="redeemable">In Catalogue Only</option>
+                </select>
+                <button class="btn btn-outline btn-sm" onclick="loadCatalogue()">&#128269; Refresh</button>
+            </div>
+            <div class="tbl-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th>Category</th>
+                            <th>Price (LL)</th>
+                            <th>In Catalogue</th>
+                            <th>Points Required</th>
+                            <?php if($is_super):?><th>Actions</th><?php endif;?>
+                        </tr>
+                    </thead>
+                    <tbody id="cat-tbody">
+                        <tr><td colspan="6" style="text-align:center;color:#9E9E9E;padding:24px">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
 </div><!-- /container -->
 
 <!-- ── Enroll Modal ─────────────────────────────────────────────────────────── -->
@@ -520,6 +563,31 @@ tbody td{padding:10px 12px;font-size:13px;vertical-align:middle}
     </div>
 </div>
 
+<!-- ── Catalogue Edit Modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="cat-edit-modal">
+    <div class="modal">
+        <h3>&#11088; Catalogue Settings</h3>
+        <input type="hidden" id="cat-edit-id">
+        <div style="font-size:14px;font-weight:700;color:#1565C0;margin-bottom:16px;" id="cat-edit-name"></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+            <input type="checkbox" id="cat-edit-redeemable"
+                onchange="document.getElementById('cat-pts-row').style.display=this.checked?'':'none'">
+            <label for="cat-edit-redeemable" style="font-size:13px;font-weight:600;cursor:pointer;">
+                Include in Redemption Catalogue
+            </label>
+        </div>
+        <div id="cat-pts-row" class="form-group" style="display:none;">
+            <label>Points Required to Redeem (per unit)</label>
+            <input type="number" id="cat-edit-pts" min="1" step="1" placeholder="e.g. 350">
+            <div class="hint">Customer needs this many points to get one unit free</div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeModal('cat-edit-modal')">Cancel</button>
+            <button class="btn btn-success" onclick="saveCatalogueItem()">&#10003; Save</button>
+        </div>
+    </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -535,7 +603,7 @@ let generatedCard    = '';
 
 function switchTab(name) {
     document.querySelectorAll('.tab-btn').forEach((b,i) => {
-        const panels = ['clients','transactions','inactive','settings'];
+        const panels = ['clients','transactions','inactive','catalogue','settings'];
         b.classList.toggle('active', panels[i] === name);
     });
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -544,6 +612,80 @@ function switchTab(name) {
     if (name === 'clients')      loadClients();
     if (name === 'transactions') loadTransactions();
     if (name === 'inactive')     loadInactive();
+    if (name === 'catalogue')    loadCatalogue();
+}
+
+// ── Catalogue ──────────────────────────────────────────────────────────────────
+var _catalogueAll = [];
+
+function loadCatalogue(q) {
+    var query = q !== undefined ? q : (document.getElementById('cat-search') ? document.getElementById('cat-search').value : '');
+    var filter = document.getElementById('cat-filter') ? document.getElementById('cat-filter').value : 'all';
+    var url = 'ajax/pos_loyalty_ajax.php?action=get_catalogue&q=' + encodeURIComponent(query);
+    if (filter === 'redeemable') url += '&redeemable=1';
+    fetch(url)
+        .then(r => r.json()).then(data => {
+        if (!data.success) return;
+        _catalogueAll = data.products;
+        renderCatalogue(_catalogueAll);
+    });
+}
+
+function searchCatalogue() {
+    clearTimeout(window._catTimer);
+    window._catTimer = setTimeout(() => loadCatalogue(), 300);
+}
+
+function renderCatalogue(products) {
+    var tbody = document.getElementById('cat-tbody');
+    if (!products.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9E9E9E;padding:24px">No products found</td></tr>';
+        return;
+    }
+    tbody.innerHTML = products.map(p => {
+        var inCat = p.redeemable == 1;
+        var catBadge = inCat
+            ? '<span class="badge badge-green">&#11088; In Catalogue</span>'
+            : '<span class="badge badge-grey">Not in catalogue</span>';
+        var ptsCell = inCat && p.points_price
+            ? '<b>' + Number(p.points_price).toLocaleString() + ' pts</b>'
+            : '<span style="color:#9E9E9E;">—</span>';
+        var actions = IS_SUPER
+            ? `<button class="btn btn-outline btn-sm" onclick="openCatalogueEdit(${p.codep},'${(p.nomp||'').replace(/'/g,"\\'")}',${p.redeemable||0},${p.points_price||0})">Edit</button>`
+            : '';
+        return `<tr>
+            <td><b>${p.nomp}</b></td>
+            <td>${p.category || '—'}</td>
+            <td>LL ${Number(p.price).toLocaleString()}</td>
+            <td>${catBadge}</td>
+            <td>${ptsCell}</td>
+            ${IS_SUPER ? `<td>${actions}</td>` : ''}
+        </tr>`;
+    }).join('');
+}
+
+// ── Catalogue Edit Modal ────────────────────────────────────────────────────────
+function openCatalogueEdit(id, name, redeemable, pointsPrice) {
+    document.getElementById('cat-edit-id').value    = id;
+    document.getElementById('cat-edit-name').textContent = name;
+    document.getElementById('cat-edit-redeemable').checked = redeemable == 1;
+    document.getElementById('cat-edit-pts').value   = pointsPrice || '';
+    document.getElementById('cat-pts-row').style.display = redeemable == 1 ? '' : 'none';
+    openModal('cat-edit-modal');
+}
+
+function saveCatalogueItem() {
+    var id         = document.getElementById('cat-edit-id').value;
+    var redeemable = document.getElementById('cat-edit-redeemable').checked ? 1 : 0;
+    var pts        = document.getElementById('cat-edit-pts').value;
+    fetch('ajax/pos_loyalty_ajax.php', {
+        method: 'POST',
+        headers: {'Content-Type':'application/x-www-form-urlencoded'},
+        body: `action=save_catalogue&product_id=${id}&redeemable=${redeemable}&points_price=${pts}`
+    }).then(r => r.json()).then(data => {
+        if (data.success) { toast('Catalogue updated'); closeModal('cat-edit-modal'); loadCatalogue(); }
+        else toast(data.error, false);
+    });
 }
 
 function loadInactive() {

@@ -23,11 +23,12 @@ $usd_to_lbp       = (float)($pos_settings['usd_to_lbp'] ?? 89500);
 $usd_denoms       = $pos_settings['usd_denominations']  ?? '1,5,10,20,50,100';
 $lbp_denoms       = $pos_settings['lbp_denominations']  ?? '5000,10000,20000,50000,100000';
 $vat_rate         = (float)($pos_settings['vat_rate']   ?? 0);
-$loyalty_mode     = $pos_settings['loyalty_mode']       ?? 'disabled';
-$loyalty_rate     = (float)($pos_settings['loyalty_rate'] ?? 2.00);
-$point_value      = (int)($pos_settings['loyalty_point_value'] ?? 1000);
-$min_redeem       = (int)($pos_settings['loyalty_min_redeem']  ?? 5000);
-$ukey_card        = $pos_settings['universal_key_card'] ?? '';
+$loyalty_mode      = $pos_settings['loyalty_mode']        ?? 'disabled';
+$loyalty_rate      = (float)($pos_settings['loyalty_rate']  ?? 2.00);
+$point_value       = (int)($pos_settings['loyalty_point_value'] ?? 1000);
+$min_redeem        = (int)($pos_settings['loyalty_min_redeem']  ?? 5000);
+$ukey_card         = $pos_settings['universal_key_card']   ?? '';
+$loyalty_min_grade = $pos_settings['loyalty_min_grade']    ?? 'gold';
 
 // Pre-compute denomination arrays for JS
 $usd_arr = array_values(array_filter(array_map('intval', explode(',', $usd_denoms))));
@@ -476,12 +477,11 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
             </div>
             <?php endif; ?>
 
-            <!-- Redeem toggle — shown when balance available -->
+            <!-- Redeem section -->
+            <?php if($loyalty_mode === 'cashback'): ?>
             <div id="loyaltyRedeemSection" style="display:none;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                    <span style="font-size:12px;font-weight:700;color:#065F46;">
-                        <?= $loyalty_mode === 'points' ? 'Redeem Points' : 'Use Wallet' ?>
-                    </span>
+                    <span style="font-size:12px;font-weight:700;color:#065F46;">Use Wallet</span>
                     <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
                         <input type="checkbox" id="loyaltyUseToggle" onchange="onLoyaltyToggle()">
                         <span style="font-size:12px;color:#6b7280;">Apply to this sale</span>
@@ -491,6 +491,20 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
                     <span id="loyaltyRedeemDetail"></span>
                 </div>
             </div>
+            <?php else: ?>
+            <!-- Points mode: redeemable items list shown directly in modal -->
+            <div id="loyaltyRedeemSection" style="display:none;">
+                <div style="font-size:12px;font-weight:700;color:#92400E;margin-bottom:6px;">
+                    &#11088; Redeemable Items in Cart
+                </div>
+                <div id="loyaltyCartItems" style="display:flex;flex-direction:column;gap:6px;">
+                    <!-- populated by buildModalRedeemList() -->
+                </div>
+                <div id="loyaltyNoRedeemable" style="display:none;padding:7px 10px;background:#FFFBEB;border-radius:7px;font-size:12px;color:#92400E;">
+                    No redeemable items in cart. Add catalogue items to use points.
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
         <!-- ── End Loyalty Panel ──────────────────────────────────────────── -->
@@ -1390,9 +1404,18 @@ var LBP_ROUND  = 5000; // smallest useful denomination in Lebanon
 // ── Loyalty globals ────────────────────────────────────────────────────────
 var LOYALTY_MODE      = '<?= $loyalty_mode ?>';
 var LOYALTY_RATE      = <?= $loyalty_rate ?>;
-var LOYALTY_PV        = <?= $point_value ?>;   // LBP per point
-var LOYALTY_MIN       = <?= $min_redeem ?>;    // min balance/points to redeem
+var LOYALTY_PV        = <?= $point_value ?>;
+var LOYALTY_MIN       = <?= $min_redeem ?>;
 var UKEY_CARD         = '<?= addslashes($ukey_card) ?>';
+
+var loyaltyClientId   = null;
+var loyaltyClientName = '';
+var loyaltyBalance    = 0;
+var loyaltyAuthMethod = 'none';
+var loyaltyUseAmount  = 0;
+var loyaltySupervisorOvr = false;
+window._loyaltyClientGrade = 'regular';
+window._loyaltyMinGrade    = '<?= $loyalty_min_grade ?? 'gold' ?>';
 
 var loyaltyClientId   = null;
 var loyaltyClientName = '';
@@ -1595,15 +1618,15 @@ function adjustChangeSplit() {
 function resetLoyalty() {
     loyaltyClientId = null; loyaltyClientName = ''; loyaltyBalance = 0;
     loyaltyAuthMethod = 'none'; loyaltyUseAmount = 0; loyaltySupervisorOvr = false;
+    window._loyaltyClientGrade = 'regular';
+    cart.forEach(function(i) { i.points_redeemed = false; });
     if (LOYALTY_MODE === 'disabled') return;
     setAuthState('none');
-    document.getElementById('loyaltyCardInput').value = '';
-    var ph = document.getElementById('loyaltyPhoneInput');
-    if (ph) ph.value = '';
-    var sk = document.getElementById('supervisorKeyInput');
-    if (sk) sk.value = '';
-    document.getElementById('loyaltyClientInfo').style.display   = 'none';
-    document.getElementById('loyaltyRedeemSection').style.display = 'none';
+    var lci = document.getElementById('loyaltyCardInput'); if (lci) lci.value = '';
+    var ph  = document.getElementById('loyaltyPhoneInput');    if (ph)  ph.value  = '';
+    var sk  = document.getElementById('supervisorKeyInput');   if (sk)  sk.value  = '';
+    var ci  = document.getElementById('loyaltyClientInfo');    if (ci)  ci.style.display   = 'none';
+    var rs  = document.getElementById('loyaltyRedeemSection'); if (rs)  rs.style.display   = 'none';
     var sovr = document.getElementById('supervisorOverrideSection');
     if (sovr) sovr.style.display = 'none';
     var tog = document.getElementById('loyaltyUseToggle');
@@ -1612,8 +1635,8 @@ function resetLoyalty() {
 }
 
 function setAuthState(state) {
-    var el = document.getElementById('loyaltyAuthState');
-    if (!el) return;
+    var authEl = document.getElementById('loyaltyAuthState');
+    if (!authEl) return;
     var msgs = {
         'none':               { bg:'#FEF3C7', color:'#92400E', icon:'&#9888;', text:'No loyalty card — scan card or enter phone number' },
         'phone_only':         { bg:'#FFF7ED', color:'#C2410C', icon:'&#128222;', text:'Phone lookup only — ' + (LOYALTY_MODE==='cashback' ? 'card required to earn cashback' : 'points will be earned') },
@@ -1621,10 +1644,10 @@ function setAuthState(state) {
         'supervisor_override':{ bg:'#EFF6FF', color:'#1D4ED8', icon:'&#128273;', text:'Supervisor override — cashback will be credited' },
     };
     var m = msgs[state] || msgs['none'];
-    el.style.background = m.bg;
-    el.style.color      = m.color;
-    el.innerHTML        = m.icon + ' ' + m.text;
-    loyaltyAuthMethod   = state;
+    authEl.style.background = m.bg;
+    authEl.style.color      = m.color;
+    authEl.innerHTML        = m.icon + ' ' + m.text;
+    loyaltyAuthMethod       = state;
 }
 
 function onLoyaltyInput(val) {
@@ -1642,8 +1665,8 @@ function scanLoyaltyCard() {
         .then(r => r.json()).then(data => {
         if (!data.success) {
             setAuthState('none');
-            document.getElementById('loyaltyClientInfo').style.display = 'none';
-            document.getElementById('loyaltyRedeemSection').style.display = 'none';
+            var ci0 = document.getElementById('loyaltyClientInfo');   if (ci0) ci0.style.display = 'none';
+            var rs0 = document.getElementById('loyaltyRedeemSection'); if (rs0) rs0.style.display = 'none';
             return;
         }
         if (data.is_universal_key) {
@@ -1694,25 +1717,26 @@ function onSupervisorKeyInput(val) {
 }
 
 function setLoyaltyClient(client, authMethod) {
-    loyaltyClientId   = client.id;
-    loyaltyClientName = client.name;
-    loyaltyBalance    = LOYALTY_MODE === 'cashback' ? client.wallet_balance : client.loyalty_points;
+    loyaltyClientId    = client.id;
+    loyaltyClientName  = client.name;
+    loyaltyBalance     = LOYALTY_MODE === 'cashback' ? client.wallet_balance : client.loyalty_points;
+    window._loyaltyClientGrade = client.grade || 'regular';
+    selectedClientId   = client.id;
+    selectedClientName = client.name;
     setAuthState(authMethod);
-
-    // Show client info box
     var ci = document.getElementById('loyaltyClientInfo');
-    ci.style.display = '';
-    document.getElementById('loyaltyClientName').textContent = client.name;
-    var balText = LOYALTY_MODE === 'cashback'
+    if (ci) ci.style.display = '';
+    var cn = document.getElementById('loyaltyClientName');
+    if (cn) cn.textContent = client.name;
+    var bl = document.getElementById('loyaltyBalanceText');
+    if (bl) bl.textContent = LOYALTY_MODE === 'cashback'
         ? 'Wallet: LL ' + loyaltyBalance.toLocaleString()
         : 'Points: ' + loyaltyBalance.toLocaleString() + ' pts';
-    document.getElementById('loyaltyBalanceText').textContent = balText;
-
-    // In cashback mode with phone-only auth: show supervisor override section
     if (LOYALTY_MODE === 'cashback' && authMethod === 'phone_only') {
         var sovr = document.getElementById('supervisorOverrideSection');
         if (sovr) sovr.style.display = '';
-        document.getElementById('loyaltyRedeemSection').style.display = 'none';
+        var rs = document.getElementById('loyaltyRedeemSection');
+        if (rs) rs.style.display = 'none';
     } else {
         var sovr = document.getElementById('supervisorOverrideSection');
         if (sovr) sovr.style.display = 'none';
@@ -1721,20 +1745,109 @@ function setLoyaltyClient(client, authMethod) {
 }
 
 function showLoyaltyRedeemSection() {
-    var canRedeem = LOYALTY_MODE === 'cashback'
-        ? loyaltyBalance >= LOYALTY_MIN
-        : loyaltyBalance >= LOYALTY_MIN;
     var sec = document.getElementById('loyaltyRedeemSection');
-    sec.style.display = canRedeem ? '' : 'none';
-    if (!canRedeem) {
-        loyaltyUseAmount = 0;
+    if (!sec) return;
+    // For points mode — always show section (contains the redeemable items list)
+    // For cashback mode — only show if enough balance
+    if (LOYALTY_MODE === 'points') {
+        sec.style.display = '';
+        buildModalRedeemList();
         updateTotals();
         return;
     }
+    var canRedeem = loyaltyBalance >= LOYALTY_MIN;
+    sec.style.display = canRedeem ? '' : 'none';
+    if (!canRedeem) { loyaltyUseAmount = 0; updateTotals(); return; }
     var tog = document.getElementById('loyaltyUseToggle');
     if (tog) tog.checked = false;
-    document.getElementById('loyaltyRedeemInfo').style.display = 'none';
+    var ri = document.getElementById('loyaltyRedeemInfo');
+    if (ri) ri.style.display = 'none';
     loyaltyUseAmount = 0;
+    updateTotals();
+}
+
+// ── Build redeemable items list inside payment modal (Points mode) ─────────────
+function buildModalRedeemList() {
+    var listEl = document.getElementById('loyaltyCartItems');
+    var noneEl = document.getElementById('loyaltyNoRedeemable');
+    if (!listEl) return;
+    // Always fetch catalogue fresh — don't rely on cart item properties
+    fetch('ajax/pos_loyalty_ajax.php?action=get_catalogue')
+        .then(function(r){ return r.json(); })
+        .then(function(data) {
+            if (!data.success) return;
+            // Build map: product_id → points_price
+            var catMap = {};
+            data.products.forEach(function(p) {
+                if (p.redeemable == 1 && p.points_price) {
+                    catMap[parseInt(p.codep)] = parseInt(p.points_price);
+                }
+            });
+            var gradeOrder  = {regular:0,gold:1,platinum:2,premium:3};
+            var clientGrade = window._loyaltyClientGrade || 'regular';
+            var minGrade    = window._loyaltyMinGrade    || 'gold';
+            var gradeOk     = (gradeOrder[clientGrade]||0) >= (gradeOrder[minGrade]||1);
+            // Cross-reference cart with catalogue
+            var eligible = [];
+            cart.forEach(function(item, idx) {
+                var pts = catMap[parseInt(item.product_id)];
+                if (pts) {
+                    item.redeemable   = 1;
+                    item.points_price = pts;
+                    eligible.push({item:item, idx:idx, ptsCost: pts * item.qty});
+                }
+            });
+            if (!eligible.length || !gradeOk) {
+                listEl.innerHTML = '';
+                if (noneEl) {
+                    noneEl.style.display = '';
+                    noneEl.textContent = !gradeOk
+                        ? 'Redemption requires ' + minGrade + ' grade or higher. Current grade: ' + clientGrade + '.'
+                        : 'No redeemable catalogue items in cart.';
+                }
+                return;
+            }
+            if (noneEl) noneEl.style.display = 'none';
+            listEl.innerHTML = eligible.map(function(e) {
+                var item    = e.item;
+                var idx     = e.idx;
+                var ptsCost = e.ptsCost;
+                var enough  = loyaltyBalance >= ptsCost;
+                if (item.points_redeemed) {
+                    return '<div style="display:flex;align-items:center;justify-content:space-between;' +
+                        'padding:7px 10px;background:#ECFDF5;border-radius:7px;border:1px solid #6EE7B7;margin-bottom:4px;">' +
+                        '<div><div style="font-size:12px;font-weight:700;color:#065F46;">' +
+                        escHtml(item.product_name) + ' &times;' + item.qty + '</div>' +
+                        '<div style="font-size:11px;color:#6b7280;">Points used: ' + ptsCost.toLocaleString() + '</div></div>' +
+                        '<span style="background:#D97706;color:#fff;padding:3px 10px;border-radius:12px;' +
+                        'font-size:11px;font-weight:700;">&#11088; FREE</span></div>';
+                }
+                return '<div style="display:flex;align-items:center;justify-content:space-between;' +
+                    'padding:7px 10px;background:#FFFBEB;border-radius:7px;border:1px solid #FCD34D;margin-bottom:4px;">' +
+                    '<div><div style="font-size:12px;font-weight:700;">' +
+                    escHtml(item.product_name) + ' &times;' + item.qty + '</div>' +
+                    '<div style="font-size:11px;color:#92400E;">' + ptsCost.toLocaleString() + ' pts &rarr; FREE</div></div>' +
+                    (enough
+                        ? '<button onclick="redeemModalItem(' + idx + ')" ' +
+                          'style="padding:6px 14px;background:#D97706;color:#fff;border:none;border-radius:7px;' +
+                          'font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">&#11088; Redeem</button>'
+                        : '<span style="font-size:11px;color:#9E9E9E;text-align:right;">Need<br>' +
+                          ptsCost.toLocaleString() + ' pts</span>') +
+                    '</div>';
+            }).join('');
+        });
+}
+
+function redeemModalItem(idx) {
+    var item = cart[idx];
+    if (!item || !item.redeemable || !item.points_price || item.points_redeemed) return;
+    var ptsCost = item.points_price * item.qty;
+    if (loyaltyBalance < ptsCost) { alert('Not enough points.'); return; }
+    item.points_redeemed = true;
+    loyaltyBalance -= ptsCost;
+    var bl = document.getElementById('loyaltyBalanceText');
+    if (bl) bl.textContent = 'Points: ' + loyaltyBalance.toLocaleString() + ' pts';
+    buildModalRedeemList();
     updateTotals();
 }
 
@@ -1770,8 +1883,7 @@ function onLoyaltyToggle() {
 function getLoyaltyDiscountLbp() {
     if (!loyaltyClientId || loyaltyUseAmount <= 0) return 0;
     if (LOYALTY_MODE === 'cashback') return loyaltyUseAmount;
-    if (LOYALTY_MODE === 'points')   return loyaltyUseAmount * LOYALTY_PV;
-    return 0;
+    return 0; // points mode: redemption is per-item in cart, not a bill discount
 }
 
 function getLoyaltyEarnPreview(amountPaid) {
@@ -1785,6 +1897,17 @@ function getLoyaltyEarnPreview(amountPaid) {
         return Math.floor((amountPaid / 1000) * LOYALTY_RATE);
     }
     return 0;
+}
+
+function getCatalogueRedemptions() {
+    return cart
+        .filter(function(i) { return i.points_redeemed && i.points_price; })
+        .map(function(i) { return {
+            product_id:   i.product_id,
+            product_name: i.product_name,
+            points_cost:  i.points_price,
+            qty:          i.qty
+        }; });
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1833,7 +1956,14 @@ function completeSale() {
     fd.append('change_usd',     changeUsd);
     fd.append('change_lbp',     changeLbp);
     fd.append('exact_lbp',      Math.round(afterDisc + vatAmt));
-    fd.append('items',          JSON.stringify(cart));
+    // Redeemed catalogue items sent with unit_price=0 so receipt shows FREE
+    var itemsToSend = cart.map(function(i) {
+        return i.points_redeemed
+            ? Object.assign({}, i, {unit_price: 0, subtotal: 0, redeemed_with_points: true})
+            : i;
+    });
+    fd.append('items',               JSON.stringify(itemsToSend));
+    fd.append('catalogue_redemptions', JSON.stringify(getCatalogueRedemptions()));
     // Loyalty params
     fd.append('loyalty_client_id',         loyaltyClientId || '');
     fd.append('loyalty_auth',              loyaltyAuthMethod);
@@ -1876,7 +2006,13 @@ function showReceipt(saleId, total, subtotal, discount, paidUsd, paidLbp, change
     // Items
     document.getElementById('receiptItems').innerHTML =
         '<div style="margin:10px 0;font-weight:700;font-size:12px;text-transform:uppercase;color:#6b7280;border-bottom:1px solid #e5e7eb;padding-bottom:6px;">Items</div>' +
-        cart.map(item => '<div class="receipt-item-row"><span>' + escHtml(item.product_name) + ' x' + item.qty + '</span><span>LL ' + Math.round(item.unit_price * item.qty).toLocaleString() + '</span></div>').join('');
+        cart.map(function(item) {
+            var amt = item.points_redeemed
+                ? '<span style="color:#D97706;font-weight:700;">&#11088; FREE</span>'
+                : 'LL ' + Math.round(item.unit_price * item.qty).toLocaleString();
+            return '<div class="receipt-item-row"><span>' + escHtml(item.product_name) +
+                ' x' + item.qty + '</span><span>' + amt + '</span></div>';
+        }).join('');
 
     // Totals breakdown
     var afterDisc  = Math.max(0, subtotal - discount);
