@@ -28,20 +28,38 @@ switch ($action) {
     // ── Search clients ─────────────────────────────────────────────────────
     case 'search_clients':
         $q = '%' . mysqli_real_escape_string($conn, $_GET['q'] ?? '') . '%';
+
+        // Fetch grade thresholds to compute grade dynamically
+        $co_cl = mysqli_fetch_assoc(mysqli_query($conn,
+            "SELECT grade_gold_threshold, grade_platinum_threshold, grade_premium_threshold
+             FROM company_settings LIMIT 1"));
+        $tg  = (int)($co_cl['grade_gold_threshold']     ?? 5000000);
+        $tp  = (int)($co_cl['grade_platinum_threshold'] ?? 15000000);
+        $tpm = (int)($co_cl['grade_premium_threshold']  ?? 30000000);
+
         $res = mysqli_query($conn,
-            "SELECT id, nom, prenom, company, number
+            "SELECT id, nom, prenom, company, number,
+                    loyalty_card, total_spent,
+                    CASE
+                        WHEN total_spent >= $tpm THEN 'premium'
+                        WHEN total_spent >= $tp  THEN 'platinum'
+                        WHEN total_spent >= $tg  THEN 'gold'
+                        ELSE 'regular'
+                    END AS grade
              FROM client
              WHERE nom LIKE '$q' OR prenom LIKE '$q'
              OR company LIKE '$q' OR number LIKE '$q'
-             ORDER BY nom, prenom LIMIT 10"
-        );
+             ORDER BY nom, prenom LIMIT 10");
         $clients = [];
         while ($r = mysqli_fetch_assoc($res)) {
             $clients[] = [
-                'id'      => $r['id'],
-                'name'    => trim(($r['prenom'] ?? '') . ' ' . ($r['nom'] ?? '')),
-                'company' => $r['company'] ?? '',
-                'number'  => $r['number'] ?? ''
+                'id'           => $r['id'],
+                'name'         => trim(($r['prenom'] ?? '') . ' ' . ($r['nom'] ?? '')),
+                'company'      => $r['company']      ?? '',
+                'number'       => $r['number']        ?? '',
+                'grade'        => $r['grade']         ?? 'regular',
+                'loyalty_card' => $r['loyalty_card']  ?? '',
+                'total_spent'  => (int)($r['total_spent'] ?? 0),
             ];
         }
         echo json_encode(['success' => true, 'data' => $clients]);

@@ -351,10 +351,14 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
                 <span id="gradeTag"></span>
                 <button onclick="clearCustomer()" title="Remove"><i class="fas fa-times"></i></button>
             </div>
+            <?php if ($agent_name === 'super'): ?>
             <div class="grade-discount-bar" id="gradeDiscountBar">
                 <i class="fas fa-tag"></i>
                 <span id="gradeDiscountText"></span>
             </div>
+            <?php else: ?>
+            <div id="gradeDiscountBar" style="display:none;"></div>
+            <?php endif; ?>
         </div>
 
         <!-- Client purchase history panel -->
@@ -417,12 +421,16 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
             <div class="pay-row" id="coLbpRow" style="color:#1976D2;font-size:11px;display:none;"><span>= USD equivalent</span><span id="coLbpEquiv">$ 0.00</span></div>
         </div>
 
-        <!-- Discount -->
+        <!-- Discount — super only; cashiers see read-only LL 0 -->
         <div class="pay-section">
             <span class="pay-section-label"><i class="fas fa-tag"></i> Discount (LL)</span>
             <div class="discount-input-wrap">
                 <span>LL</span>
+                <?php if ($agent_name === 'super'): ?>
                 <input type="number" id="discountInput" value="0" min="0" step="1000" oninput="updateTotals()" placeholder="0" onwheel="event.preventDefault()">
+                <?php else: ?>
+                <input type="number" id="discountInput" value="0" min="0" step="1000" placeholder="0" readonly style="background:#f3f4f6;color:#9ca3af;cursor:not-allowed;">
+                <?php endif; ?>
             </div>
         </div>
 
@@ -1086,14 +1094,18 @@ function renderCart() {
                 : '';
             var freeTag = item.is_promo_free
                 ? '<span style="font-size:10px;background:#16a34a;color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px;font-weight:700;">FREE</span>'
-                : '';
+                : item.points_redeemed
+                    ? '<span style="font-size:10px;background:#D97706;color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px;font-weight:700;">&#11088; FREE</span>'
+                    : '';
             var bundleTag = item.is_bundle_component
                 ? '<span style="font-size:10px;background:#7c3aed;color:#fff;padding:1px 6px;border-radius:8px;margin-left:5px;font-weight:700;">🎁 ' + escHtml(item.bundle_name || 'Bundle') + '</span>'
                 : '';
             var priceDisplay = item.is_promo_free
-                ? '<span style="text-decoration:line-through;color:#94a3b8;">LL ' + Math.round(item.unit_price).toLocaleString() + '</span> FREE'
-                : 'LL ' + Math.round(item.unit_price).toLocaleString() + ' / ' + (item.unit || 'pc');
-            return '<div class="cart-item"' + (item.is_promo_free ? ' style="border-left:3px solid #16a34a;"' : item.is_bundle_component ? ' style="border-left:3px solid #7c3aed;"' : item.promo_label ? ' style="border-left:3px solid #dc2626;"' : '') + '>' +
+                ? '<span style="text-decoration:line-through;color:#94a3b8;">LL ' + Math.round(item.original_price || item.unit_price).toLocaleString() + '</span> FREE'
+                : item.points_redeemed
+                    ? '<span style="text-decoration:line-through;color:#94a3b8;">LL ' + Math.round(item.original_price).toLocaleString() + '</span> FREE'
+                    : 'LL ' + Math.round(item.unit_price).toLocaleString() + ' / ' + (item.unit || 'pc');
+            return '<div class="cart-item"' + (item.is_promo_free ? ' style="border-left:3px solid #16a34a;"' : item.points_redeemed ? ' style="border-left:3px solid #D97706;"' : item.is_bundle_component ? ' style="border-left:3px solid #7c3aed;"' : item.promo_label ? ' style="border-left:3px solid #dc2626;"' : '') + '>' +
                 '<div class="cart-item-top">' +
                     '<div class="item-name">' + escHtml(item.product_name) + promoTag + freeTag + bundleTag + '</div>' +
                     '<div class="item-unit-price">' + priceDisplay + '</div>' +
@@ -1198,9 +1210,11 @@ function updateTotals() {
     document.getElementById('totalDisplay').textContent   = 'LL ' + total.toLocaleString();
     document.getElementById('chargeBtnTotal').textContent = 'LL ' + total.toLocaleString();
     var coTotal = document.getElementById('coTotal');
-    var confirmBtn = document.getElementById('confirmChargeBtn');
-    if (coTotal)    coTotal.textContent       = 'LL ' + total.toLocaleString();
-    if (confirmBtn) confirmBtn.dataset.total  = total;
+    var confirmBtn  = document.getElementById('confirmChargeBtn');
+    var confirmSpan = document.getElementById('confirmTotal');
+    if (coTotal)     coTotal.textContent      = 'LL ' + total.toLocaleString();
+    if (confirmBtn)  confirmBtn.dataset.total = total;
+    if (confirmSpan) confirmSpan.textContent  = 'LL ' + total.toLocaleString();
 
     // USD equivalent
     var usdEquiv = total / USD_TO_LBP;
@@ -1227,20 +1241,24 @@ document.getElementById('customerSearch').addEventListener('input', function() {
                 if (!data.success || data.data.length === 0) {
                     dd.innerHTML = '<div class="customer-item"><span class="cname">No clients found</span></div>';
                 } else {
-                    dd.innerHTML = data.data.map(c =>
-                        '<div class="customer-item" onclick="selectCustomer(' + c.id + ',\'' + escJs(c.name) + '\',\'' + escJs(c.grade || '') + '\',\'' + escJs(c.loyalty || '') + '\')">' +
+                    dd.innerHTML = data.data.map(c => {
+                        var hasCard = c.loyalty_card ? 'Yes' : '';
+                        return '<div class="customer-item" onclick="selectCustomer(' + c.id + ',\'' + escJs(c.name) + '\',\'' + escJs(c.grade || '') + '\',\'' + hasCard + '\')">' +
                             '<div class="cname">' + escHtml(c.name) + (c.company ? ' — ' + escHtml(c.company) : '') +
-                            (c.grade ? ' <span style="font-size:10px;font-weight:700;color:#7c3aed;background:#f3f0ff;padding:1px 6px;border-radius:10px;">' + escHtml(c.grade.charAt(0).toUpperCase()+c.grade.slice(1)) + '</span>' : '') +
-                            (c.loyalty === 'Yes' ? ' <span style="font-size:10px;font-weight:700;color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:10px;">&#9733; Card</span>' : '') +
+                            (c.grade && c.grade !== 'regular' ? ' <span style="font-size:10px;font-weight:700;color:#7c3aed;background:#f3f0ff;padding:1px 6px;border-radius:10px;">' + escHtml(c.grade.charAt(0).toUpperCase()+c.grade.slice(1)) + '</span>' : '') +
+                            (hasCard ? ' <span style="font-size:10px;font-weight:700;color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:10px;">&#9733; Card</span>' : '') +
                             '</div>' +
                             '<div class="cnum">' + (c.number || '') + '</div>' +
-                        '</div>'
-                    ).join('');
+                        '</div>';
+                    }).join('');
                 }
                 dd.classList.add('show');
             });
     }, 300);
 });
+
+// ── Super-only flag (grade discounts restricted to super account) ─────────
+var IS_SUPER = <?= $agent_name === 'super' ? 'true' : 'false' ?>;
 
 // ── Grade → discount mapping — loaded from Settings ──────────────────────
 var GRADE_DISCOUNTS = {
@@ -1276,7 +1294,8 @@ function selectCustomer(id, name, grade, loyalty) {
     var gradeTag = document.getElementById('gradeTag');
     var discBar  = document.getElementById('gradeDiscountBar');
     var discPct  = GRADE_DISCOUNTS[gradeKey] || 0;
-    gradeDiscountApplied = discPct;
+    // Grade discount is super-only — non-super cashiers never apply it
+    gradeDiscountApplied = IS_SUPER ? discPct : 0;
 
     var badges = '';
     if (gradeKey) {
@@ -1291,7 +1310,7 @@ function selectCustomer(id, name, grade, loyalty) {
     }
     gradeTag.innerHTML = badges;
 
-    if (discPct > 0) {
+    if (discPct > 0 && IS_SUPER) {
         document.getElementById('gradeDiscountText').textContent =
             gradeKey.charAt(0).toUpperCase() + gradeKey.slice(1) + ' customer — ' + discPct + '% loyalty discount applied automatically';
         discBar.style.display = 'flex';
@@ -1543,7 +1562,13 @@ function calcChange() {
         return;
     }
 
-    if (net >= 0) {
+    if (net === 0) {
+        // Exact payment — hide change box, show green tick on remaining row
+        remAmt.textContent  = 'LL 0';
+        remEl.className     = 'pay-row total-row due-row ok';
+        changeBox.className = 'change-box'; // hidden
+        document.getElementById('changeSplitWrap').style.display = 'none';
+    } else if (net > 0) {
         // Auto-suggest split: USD bills first, LBP remainder
         var suggestUsd = Math.floor(net / USD_TO_LBP);
         var suggestRem = net - (suggestUsd * USD_TO_LBP);
@@ -1723,6 +1748,20 @@ function setLoyaltyClient(client, authMethod) {
     window._loyaltyClientGrade = client.grade || 'regular';
     selectedClientId   = client.id;
     selectedClientName = client.name;
+
+    // ── Apply grade discount (super account only) ────────────────────────────
+    var gradeKey = (client.grade || '').toLowerCase().trim();
+    currentClientGrade   = gradeKey;
+    var discPct          = IS_SUPER ? (GRADE_DISCOUNTS[gradeKey] || 0) : 0;
+    gradeDiscountApplied = discPct;
+    if (discPct > 0) {
+        var cartTotal = cart.reduce(function(s, i) { return s + i.unit_price * i.qty; }, 0);
+        var discInput = document.getElementById('discountInput');
+        if (discInput) discInput.value = Math.round(cartTotal * discPct / 100);
+        console.log('[NCC POS] Loyalty grade discount applied:', gradeKey, discPct + '%');
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     setAuthState(authMethod);
     var ci = document.getElementById('loyaltyClientInfo');
     if (ci) ci.style.display = '';
@@ -1843,12 +1882,43 @@ function redeemModalItem(idx) {
     if (!item || !item.redeemable || !item.points_price || item.points_redeemed) return;
     var ptsCost = item.points_price * item.qty;
     if (loyaltyBalance < ptsCost) { alert('Not enough points.'); return; }
-    item.points_redeemed = true;
+    item.points_redeemed   = true;
+    item.original_price    = item.original_price || item.unit_price;
+    item.unit_price        = 0;
     loyaltyBalance -= ptsCost;
     var bl = document.getElementById('loyaltyBalanceText');
     if (bl) bl.textContent = 'Points: ' + loyaltyBalance.toLocaleString() + ' pts';
+
+    // Recalculate grade discount based on new (reduced) cart total
+    var newCartTotal = cart.reduce(function(s, i) { return s + i.unit_price * i.qty; }, 0);
+    if (gradeDiscountApplied > 0 && IS_SUPER) {
+        var newDisc = Math.round(newCartTotal * gradeDiscountApplied / 100);
+        var discEl  = document.getElementById('discountInput');
+        if (discEl) discEl.value = newDisc;
+    }
+
+    // Recompute total with item now free and updated discount, auto-fill payment field
+    var disc       = parseFloat((document.getElementById('discountInput') || {}).value) || 0;
+    var afterDisc  = Math.max(0, newCartTotal - disc);
+    var vatAmt     = VAT_RATE > 0 ? Math.round(afterDisc * (VAT_RATE / 100)) : 0;
+    var newTotal   = Math.round(afterDisc + vatAmt);
+    var suggestLbp = Math.round(newTotal / LBP_ROUND) * LBP_ROUND;
+    console.log('[NCC POS] Redeem: newCartTotal=' + newCartTotal + ' disc=' + disc + ' newTotal=' + newTotal + ' suggestLbp=' + suggestLbp);
+
+    var pLbp = document.getElementById('paidLbp');
+    var pUsd = document.getElementById('paidUsd');
+    if (pLbp) pLbp.value = suggestLbp > 0 ? suggestLbp : '';
+    if (pUsd) pUsd.value = '';
+
+    // Ensure confirm button has the span before renderCart/updateTotals run
+    var confirmBtn = document.getElementById('confirmChargeBtn');
+    if (confirmBtn && !document.getElementById('confirmTotal')) {
+        confirmBtn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Charge <span id="confirmTotal">LL ' + newTotal.toLocaleString() + '</span>';
+    }
+
+    renderCart();
     buildModalRedeemList();
-    updateTotals();
+    calcChange();
 }
 
 function onLoyaltyToggle() {
@@ -1984,13 +2054,15 @@ function completeSale() {
             } else {
                 alert('Sale error: ' + (data.error || 'Unknown error'));
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Charge';
+                btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Charge <span id="confirmTotal">LL 0</span>';
+                updateTotals(); // re-populate span with correct total
             }
         })
         .catch(err => {
             alert('Connection error: ' + err.message);
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Charge';
+            btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirm & Charge <span id="confirmTotal">LL 0</span>';
+            updateTotals();
         });
 }
 
