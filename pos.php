@@ -1048,9 +1048,18 @@ function showScaleToast(msg, type) {
 
 function applyGradeDiscount() {
     if (!gradeDiscountApplied) return;
-    var cartTotal = cart.reduce((s, i) => s + i.unit_price * i.qty, 0);
+    var cartTotal  = cart.reduce((s, i) => s + i.unit_price * i.qty, 0);
     var discAmount = Math.round(cartTotal * gradeDiscountApplied / 100);
     document.getElementById('discountInput').value = discAmount;
+
+    // Recalculate new total and sync paidLbp so no false change box appears
+    var afterDisc  = Math.max(0, cartTotal - discAmount);
+    var vatAmt     = VAT_RATE > 0 ? Math.round(afterDisc * (VAT_RATE / 100)) : 0;
+    var newTotal   = Math.round(afterDisc + vatAmt);
+    var suggestLbp = Math.round(newTotal / LBP_ROUND) * LBP_ROUND;
+    var pLbp = document.getElementById('paidLbp');
+    if (pLbp) pLbp.value = suggestLbp > 0 ? suggestLbp : ''; // always sync
+
     updateTotals();
 }
 
@@ -1314,9 +1323,16 @@ function selectCustomer(id, name, grade, loyalty) {
         document.getElementById('gradeDiscountText').textContent =
             gradeKey.charAt(0).toUpperCase() + gradeKey.slice(1) + ' customer — ' + discPct + '% loyalty discount applied automatically';
         discBar.style.display = 'flex';
-        var cartTotal = cart.reduce((s, i) => s + i.unit_price * i.qty, 0);
+        var cartTotal  = cart.reduce((s, i) => s + i.unit_price * i.qty, 0);
         var discAmount = Math.round(cartTotal * discPct / 100);
         document.getElementById('discountInput').value = discAmount;
+        // Sync paidLbp to new total so no false change box
+        var afterDisc  = Math.max(0, cartTotal - discAmount);
+        var vatAmt     = VAT_RATE > 0 ? Math.round(afterDisc * (VAT_RATE / 100)) : 0;
+        var newTotal   = Math.round(afterDisc + vatAmt);
+        var suggestLbp = Math.round(newTotal / LBP_ROUND) * LBP_ROUND;
+        var pLbp = document.getElementById('paidLbp');
+        if (pLbp) pLbp.value = suggestLbp > 0 ? suggestLbp : ''; // always sync
         updateTotals();
     } else {
         discBar.style.display = 'none';
@@ -1446,19 +1462,18 @@ var loyaltySupervisorOvr = false;
 // ── Checkout modal ────────────────────────────────────────────────────────
 function openCheckout() {
     if (cart.length === 0) return;
+    if (gradeDiscountApplied > 0 && IS_SUPER) applyGradeDiscount(); // ensure discount is set before reading
     updateTotals();
     buildDenomButtons();
     resetLoyalty();
 
-    // Auto-suggest payment split: whole USD + LBP for cents
-    var subtotal  = cart.reduce((s, i) => s + i.unit_price * i.qty, 0); // LBP
+    // Auto-suggest payment split based on discounted total
+    var subtotal  = cart.reduce((s, i) => s + i.unit_price * i.qty, 0);
     var discount  = parseFloat(document.getElementById('discountInput').value) || 0;
     var afterDisc = Math.max(0, subtotal - discount);
     var vatAmt    = VAT_RATE > 0 ? Math.round(afterDisc * (VAT_RATE / 100)) : 0;
-    var total     = Math.round(afterDisc + vatAmt); // total in LBP
+    var total     = Math.round(afterDisc + vatAmt);
 
-    // Pre-fill: suggest exact LBP amount rounded to nearest LBP_ROUND (5,000)
-    // < 2,500 mod → round down (customer pays less); ≥ 2,500 mod → round up
     var suggestLbp = Math.round(total / LBP_ROUND) * LBP_ROUND;
     document.getElementById('paidUsd').value = '';
     document.getElementById('paidLbp').value = suggestLbp > 0 ? suggestLbp : '';
@@ -1755,9 +1770,17 @@ function setLoyaltyClient(client, authMethod) {
     var discPct          = IS_SUPER ? (GRADE_DISCOUNTS[gradeKey] || 0) : 0;
     gradeDiscountApplied = discPct;
     if (discPct > 0) {
-        var cartTotal = cart.reduce(function(s, i) { return s + i.unit_price * i.qty; }, 0);
-        var discInput = document.getElementById('discountInput');
-        if (discInput) discInput.value = Math.round(cartTotal * discPct / 100);
+        var cartTotal  = cart.reduce(function(s, i) { return s + i.unit_price * i.qty; }, 0);
+        var discAmount = Math.round(cartTotal * discPct / 100);
+        var discInput  = document.getElementById('discountInput');
+        if (discInput) discInput.value = discAmount;
+        // Sync paidLbp to new discounted total so no false change box
+        var afterDisc  = Math.max(0, cartTotal - discAmount);
+        var vatAmt     = VAT_RATE > 0 ? Math.round(afterDisc * (VAT_RATE / 100)) : 0;
+        var newTotal   = Math.round(afterDisc + vatAmt);
+        var suggestLbp = Math.round(newTotal / LBP_ROUND) * LBP_ROUND;
+        var pLbp = document.getElementById('paidLbp');
+        if (pLbp) pLbp.value = suggestLbp > 0 ? suggestLbp : '';
         console.log('[NCC POS] Loyalty grade discount applied:', gradeKey, discPct + '%');
     }
     // ─────────────────────────────────────────────────────────────────────────
@@ -1781,6 +1804,23 @@ function setLoyaltyClient(client, authMethod) {
         if (sovr) sovr.style.display = 'none';
         showLoyaltyRedeemSection();
     }
+    // Update totals AFTER paidLbp is already synced — prevents false change box
+    updateTotals();
+    // Re-run calcChange after DOM settles (async fetch in buildModalRedeemList may shift timing)
+    setTimeout(calcChange, 0);
+    setTimeout(function() {
+        var pLbp2 = document.getElementById('paidLbp');
+        if (pLbp2 && discPct > 0 && IS_SUPER) {
+            var ct2   = cart.reduce(function(s,i){ return s + i.unit_price * i.qty; }, 0);
+            var da2   = Math.round(ct2 * discPct / 100);
+            var ad2   = Math.max(0, ct2 - da2);
+            var va2   = VAT_RATE > 0 ? Math.round(ad2 * (VAT_RATE / 100)) : 0;
+            var nt2   = Math.round(ad2 + va2);
+            var sl2   = Math.round(nt2 / LBP_ROUND) * LBP_ROUND;
+            pLbp2.value = sl2 > 0 ? sl2 : '';
+        }
+        calcChange();
+    }, 400);
 }
 
 function showLoyaltyRedeemSection() {
@@ -1791,12 +1831,11 @@ function showLoyaltyRedeemSection() {
     if (LOYALTY_MODE === 'points') {
         sec.style.display = '';
         buildModalRedeemList();
-        updateTotals();
         return;
     }
     var canRedeem = loyaltyBalance >= LOYALTY_MIN;
     sec.style.display = canRedeem ? '' : 'none';
-    if (!canRedeem) { loyaltyUseAmount = 0; updateTotals(); return; }
+    if (!canRedeem) { loyaltyUseAmount = 0; return; }
     var tog = document.getElementById('loyaltyUseToggle');
     if (tog) tog.checked = false;
     var ri = document.getElementById('loyaltyRedeemInfo');
