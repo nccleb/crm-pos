@@ -63,12 +63,14 @@ $pay_labels = [
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;700;900&family=Noto+Kufi+Arabic:wght@400;700&display=swap" rel="stylesheet">
 <title>Receipt #<?= $sale_id ?></title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 
 body {
-    font-family:'Courier New', Courier, monospace;
+    font-family:'Courier New', Courier, monospace, 'Noto Sans Arabic', 'Arabic Typesetting', Arial;
     font-size:13px;
     font-weight:700;
     max-width:360px;
@@ -138,6 +140,11 @@ body {
     cursor:pointer; margin-top:16px;
     font-family:'Segoe UI', Arial, sans-serif;
 }
+/* ── Arabic text support ── */
+.ar { font-family:"Noto Sans Arabic","Noto Kufi Arabic",Arial,sans-serif; direction:rtl; unicode-bidi:embed; }
+.items-tbl tbody td { font-family:"Courier New",Courier,"Noto Sans Arabic",Arial,monospace; }
+.has-arabic { font-family:"Noto Sans Arabic","Noto Kufi Arabic",Arial,sans-serif !important; }
+
 @media print {
     .print-btn { display:none !important; }
     body { padding:4px; }
@@ -191,7 +198,8 @@ body {
             : number_format($qty_display, 0);
     ?>
     <tr>
-        <td><?= htmlspecialchars($item['product_name']) ?><?= $is_redeemed ? ' <span style="color:#D97706;font-size:10px;font-weight:700;">&#11088;</span>' : '' ?></td>
+        <?php $has_ar = preg_match('/[\x{0600}-\x{06FF}]/u', $item['product_name']); ?>
+        <td <?= $has_ar ? 'class="has-arabic" style="direction:rtl;text-align:right"' : '' ?>><?= htmlspecialchars($item['product_name']) ?><?= $is_redeemed ? ' <span style="color:#D97706;font-size:10px;font-weight:700;">&#11088;</span>' : '' ?></td>
         <td class="c"><?= $qty_str ?></td>
         <td class="r"><?= $is_redeemed ? '<span style="color:#D97706;font-weight:700;">FREE</span>' : 'LL '.number_format($unit_lbp,0) ?></td>
         <td class="r"><?= $is_redeemed ? '<span style="color:#D97706;font-weight:700;">FREE</span>' : 'LL '.number_format($item_lbp,0) ?></td>

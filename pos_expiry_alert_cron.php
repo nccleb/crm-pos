@@ -84,7 +84,7 @@ if (!$cfg) {
 
 $email_enabled = (int)$cfg['email_enabled'];
 $sms_enabled   = (int)$cfg['sms_enabled'];
-$thresholds    = [(int)$cfg['alert_days_1'], (int)$cfg['alert_days_2'], (int)$cfg['alert_days_3']];
+$thresholds    = array_filter([(int)$cfg['alert_days_1'], (int)$cfg['alert_days_2'], (int)$cfg['alert_days_3'], (int)($cfg['alert_days_4']??0)]);
 
 logMsg("Settings loaded — Email: " . ($email_enabled ? 'ON' : 'OFF')
     . " | SMS: " . ($sms_enabled ? 'ON' : 'OFF')
@@ -106,10 +106,10 @@ function discountForDays(int $days, array $cfg): array {
     return ['pct' => 0, 'label' => 'No discount', 'urgent' => 'ok'];
 }
 
-// ── Fetch batches that hit a threshold TODAY ───────────────────────────────
-// A batch "hits" a threshold when days_left equals one of the configured values
-// This prevents sending duplicate alerts on non-threshold days
-$threshold_in = implode(',', array_map('intval', $thresholds));
+// ── Fetch batches within the highest threshold ─────────────────────────────
+// Alerts every day a product is within the max configured threshold
+$threshold_in  = implode(',', array_map('intval', $thresholds));
+$max_threshold = max($thresholds);
 
 $res = mysqli_query($conn, "
     SELECT
@@ -130,7 +130,7 @@ $res = mysqli_query($conn, "
     LEFT JOIN pos_suppliers sup ON sr.supplier_id = sup.id
     WHERE p.active = 1
       AND sri.expiry_date IS NOT NULL
-      AND DATEDIFF(sri.expiry_date, CURDATE()) IN ($threshold_in)
+      AND DATEDIFF(sri.expiry_date, CURDATE()) BETWEEN 0 AND $max_threshold
     ORDER BY sri.expiry_date ASC, p.nomp ASC
 ");
 
@@ -156,7 +156,7 @@ while ($r = mysqli_fetch_assoc($res)) {
 }
 
 if (empty($batches)) {
-    logMsg('No batches hit a threshold today (' . $threshold_in . ' days). No alerts sent.');
+    logMsg('No batches within threshold today (≤' . $max_threshold . ' days). No alerts sent.');
     mysqli_close($conn);
     exit(0);
 }
@@ -262,7 +262,8 @@ function buildEmailHtml(array $batches, array $cfg): string {
     }
     $date      = date('d M Y');
     $shopName  = $cfg['smtp_from_name'] ?? 'NCC Store';
-    $threshold = implode('/', [(int)$cfg['alert_days_1'],(int)$cfg['alert_days_2'],(int)$cfg['alert_days_3']]);
+    $thresholdParts = array_filter([(int)$cfg['alert_days_1'],(int)$cfg['alert_days_2'],(int)$cfg['alert_days_3'],(int)($cfg['alert_days_4']??0)]);
+    $threshold = implode('/', $thresholdParts);
     return "<!DOCTYPE html><html><body style='margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;'>
 <div style='max-width:620px;margin:30px auto;background:white;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1);'>
   <div style='background:linear-gradient(135deg,#1976D2,#0D47A1);padding:28px 32px;'>

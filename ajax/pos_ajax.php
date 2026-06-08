@@ -1,4 +1,28 @@
 <?php
+
+// ── Scale EAN-13 Barcode Decoder ──────────────────────────────────────────
+// Decodes barcodes printed by LAN scales (prefix "2", EAN-13 format)
+// Format: 2 | PLU(5) | Weight×1000(5) | check(1)
+function decodeScaleBarcode(string $barcode): array|false {
+    $b = preg_replace('/\D/', '', $barcode);
+    if (strlen($b) !== 13 || $b[0] !== '2') return false;
+
+    $plu       = (int)substr($b, 1, 5);   // digits 2-6 = PLU
+    $raw_value = (int)substr($b, 6, 5);   // digits 7-11 = encoded value
+
+    // TEG TM-A scale uses PRICE-embedded format:
+    // raw_value × 10 = total price in LBP
+    // Example: barcode 2700020405004 → raw=04050 → 04050×10 = 40,500 LL
+    $total_price_lbp = $raw_value * 10;
+
+    return [
+        'plu'             => $plu,
+        'raw_value'       => $raw_value,
+        'total_price_lbp' => $total_price_lbp,  // use this directly as sale price
+        'barcode'         => $b,
+    ];
+}
+
 /**
  * ajax/pos_ajax.php
  * Handles all POS AJAX requests
@@ -71,18 +95,42 @@ switch ($action) {
         $cat = trim($_GET['cat'] ?? '');
         $cat_sql = $cat ? "AND category = '" . mysqli_real_escape_string($conn, $cat) . "'" : '';
 
+        // ── Scale label barcode scan (EAN-13 prefix 2) ────────────────────
+        $decoded = decodeScaleBarcode($raw);
+        if ($decoded) {
+            $plu = (int)$decoded['plu'];
+            $res = mysqli_query($conn,
+                "SELECT codep, nomp, price, price_per_kg, onhand, unit, category, image, barcode, plu_code, sold_by_weight
+                 FROM produit WHERE plu_code = '$plu' AND sold_by_weight = 1 AND active = 1 LIMIT 1");
+            if ($product = mysqli_fetch_assoc($res)) {
+                // TEG scale: price is embedded directly in barcode (raw × 10 = LBP)
+                $total_price = $decoded['total_price_lbp'];
+                $product['price']       = $total_price;   // total sale price
+                $product['qty']         = 1;              // qty=1 (price already includes weight)
+                $product['unit']        = 'pcs';
+                $product['scale_item']  = true;
+                $product['scale_price'] = $total_price;
+                echo json_encode(['success' => true, 'data' => [$product], 'scale_scan' => true]);
+                break;
+            }
+            // PLU not found — fall through to normal search
+        }
+        // ── End scale barcode check ────────────────────────────────────────
+
         if ($raw === '') {
             $res = mysqli_query($conn,
-                "SELECT codep, nomp, price, onhand, unit, category, image, barcode
+                "SELECT codep, nomp, price, onhand, unit, category, image, barcode,
+                        sold_by_weight AS is_weighted, plu_code, price_per_kg
                  FROM produit WHERE active = 1 $cat_sql
                  ORDER BY nomp LIMIT 500");
         } else {
             $q = '%' . mysqli_real_escape_string($conn, $raw) . '%';
             $res = mysqli_query($conn,
-                "SELECT codep, nomp, price, onhand, unit, category, image, barcode
+                "SELECT codep, nomp, price, onhand, unit, category, image, barcode,
+                        sold_by_weight AS is_weighted, plu_code, price_per_kg
                  FROM produit
                  WHERE active = 1 $cat_sql
-                 AND (nomp LIKE '$q' OR barcode LIKE '$q')
+                 AND (nomp LIKE '$q' OR barcode LIKE '$q' OR plu_code LIKE '$q')
                  ORDER BY nomp LIMIT 500");
         }
         $products = [];
@@ -584,6 +632,194 @@ switch ($action) {
         posLog($conn, $agent_id, $agent_name, 'sale_refunded', "Refund of Sale #$sale_id", $sale_id, 'sale');
 
         echo json_encode(['success'=>true, 'sale_id'=>$sale_id]);
+        break;
+
+    // ── Decode scale barcode (EAN-13 prefix 2) — called by pos.php ───────────
+    // Returns: product_id, product_name, price_per_kg_lbp, weight_kg, line_total_lbp
+    case 'decode_scale_barcode':
+        $barcode = trim($_GET['barcode'] ?? '');
+        $decoded = decodeScaleBarcode($barcode);
+
+        if (!$decoded) {
+            echo json_encode(['success' => false, 'error' => 'Not a valid scale barcode (must be EAN-13 starting with 2)', 'plu' => null]);
+            break;
+        }
+
+        $plu = (int)$decoded['plu'];
+
+        // Look up product by PLU code
+        $res = mysqli_query($conn,
+            "SELECT codep, nomp, price, price_per_kg, onhand, unit, category
+             FROM produit
+             WHERE plu_code = '$plu' AND sold_by_weight = 1 AND active = 1
+             AND (is_deleted = 0 OR is_deleted IS NULL)
+             LIMIT 1");
+
+        if (!$res || mysqli_num_rows($res) === 0) {
+            echo json_encode([
+                'success' => false,
+                'error'   => 'PLU ' . $plu . ' not found — check product setup in Product Manager',
+                'plu'     => $plu,
+            ]);
+            break;
+        }
+
+        $product = mysqli_fetch_assoc($res);
+
+        // Barcode format: prefix(1) + PLU(5) + price×0.1(5) + check(1)
+        // raw_value × 10 = total price in LBP (TEG TM-A format)
+        $line_total_lbp  = (float)$decoded['total_price_lbp'];
+        $price_per_kg    = (float)$product['price_per_kg'];
+
+        // Calculate weight from total price ÷ price_per_kg
+        // Guard against zero price_per_kg
+        $weight_kg = ($price_per_kg > 0)
+            ? round($line_total_lbp / $price_per_kg, 3)
+            : 1.000;
+
+        echo json_encode([
+            'success'          => true,
+            'product_id'       => (int)$product['codep'],
+            'product_name'     => $product['nomp'],
+            'price_per_kg_lbp' => $price_per_kg,
+            'weight_kg'        => $weight_kg,
+            'line_total_lbp'   => $line_total_lbp,
+            'unit'             => $product['unit'] ?? 'kg',
+            'plu'              => $plu,
+            'raw_barcode'      => $barcode,
+        ]);
+        break;
+
+    // ── Get ALL products (for pos_products.php manager) ───────────────────
+    case 'get_all_products':
+        $rows = [];
+        $res  = mysqli_query($conn,
+            "SELECT codep, nomp, category, barcode, price, cost_price, unit,
+                    onhand, low_stock_threshold, description, active,
+                    sold_by_weight, plu_code, price_per_kg,
+                    points_price, redeemable
+             FROM produit
+             WHERE is_deleted = 0 OR is_deleted IS NULL
+             ORDER BY nomp ASC");
+        while ($r = mysqli_fetch_assoc($res)) $rows[] = $r;
+        echo json_encode(['success' => true, 'products' => $rows]);
+        break;
+
+    // ── Add product ────────────────────────────────────────────────────────
+    case 'add_product':
+        $body           = json_decode(file_get_contents('php://input'), true) ?: $_POST;
+        $nomp           = mysqli_real_escape_string($conn, trim($body['nomp']               ?? ''));
+        $category       = mysqli_real_escape_string($conn, trim($body['category']           ?? ''));
+        $unit           = mysqli_real_escape_string($conn, trim($body['unit']               ?? 'piece'));
+        $barcode        = mysqli_real_escape_string($conn, trim($body['barcode']            ?? ''));
+        $price          = (float)($body['price']               ?? 0);
+        $cost_price     = (float)($body['cost_price']          ?? 0);
+        $onhand         = (float)($body['onhand']              ?? 0);
+        $low_stock      = (float)($body['low_stock_threshold'] ?? 0);
+        $description    = mysqli_real_escape_string($conn, trim($body['description']        ?? ''));
+        $active         = (int)($body['active']                ?? 1);
+        $sold_by_weight = (int)($body['sold_by_weight']        ?? 0);
+        $plu_code       = mysqli_real_escape_string($conn, trim($body['plu_code']           ?? ''));
+        $price_per_kg   = (float)($body['price_per_kg']        ?? 0);
+
+        if (!$nomp) { echo json_encode(['success'=>false,'message'=>'Name is required']); break; }
+
+        $ok = mysqli_query($conn,
+            "INSERT INTO produit
+                (nomp, category, unit, barcode, price, cost_price, onhand,
+                 low_stock_threshold, description, active,
+                 sold_by_weight, plu_code, price_per_kg)
+             VALUES
+                ('$nomp','$category','$unit','$barcode',
+                 $price, $cost_price, $onhand, $low_stock,
+                 '$description', $active,
+                 $sold_by_weight, '$plu_code', $price_per_kg)");
+
+        if ($ok) {
+            $new_id = mysqli_insert_id($conn);
+            require_once dirname(__FILE__) . '/pos_log.php';
+            posLog($conn, $agent_id, $agent_name, 'product_added', "Added: $nomp (codep $new_id)", $new_id, 'product');
+            echo json_encode(['success'=>true,'message'=>'Product added','codep'=>$new_id]);
+        } else {
+            echo json_encode(['success'=>false,'message'=>mysqli_error($conn)]);
+        }
+        break;
+
+    // ── Update product ─────────────────────────────────────────────────────
+    case 'update_product':
+        $body           = json_decode(file_get_contents('php://input'), true) ?: $_POST;
+        $codep          = (int)($body['codep']                 ?? 0);
+        $nomp           = mysqli_real_escape_string($conn, trim($body['nomp']               ?? ''));
+        $category       = mysqli_real_escape_string($conn, trim($body['category']           ?? ''));
+        $unit           = mysqli_real_escape_string($conn, trim($body['unit']               ?? 'piece'));
+        $barcode        = mysqli_real_escape_string($conn, trim($body['barcode']            ?? ''));
+        $price          = (float)($body['price']               ?? 0);
+        $cost_price     = (float)($body['cost_price']          ?? 0);
+        $onhand         = (float)($body['onhand']              ?? 0);
+        $low_stock      = (float)($body['low_stock_threshold'] ?? 0);
+        $description    = mysqli_real_escape_string($conn, trim($body['description']        ?? ''));
+        $active         = (int)($body['active']                ?? 1);
+        $sold_by_weight = (int)($body['sold_by_weight']        ?? 0);
+        $plu_code       = mysqli_real_escape_string($conn, trim($body['plu_code']           ?? ''));
+        $price_per_kg   = (float)($body['price_per_kg']        ?? 0);
+
+        if (!$codep || !$nomp) { echo json_encode(['success'=>false,'message'=>'Invalid data']); break; }
+
+        $ok = mysqli_query($conn,
+            "UPDATE produit SET
+                nomp='$nomp', category='$category', unit='$unit', barcode='$barcode',
+                price=$price, cost_price=$cost_price, onhand=$onhand,
+                low_stock_threshold=$low_stock, description='$description',
+                active=$active, sold_by_weight=$sold_by_weight,
+                plu_code='$plu_code', price_per_kg=$price_per_kg
+             WHERE codep=$codep");
+
+        if ($ok) {
+            require_once dirname(__FILE__) . '/pos_log.php';
+            posLog($conn, $agent_id, $agent_name, 'product_updated', "Updated: $nomp (codep $codep)", $codep, 'product');
+            echo json_encode(['success'=>true,'message'=>'Product updated']);
+        } else {
+            echo json_encode(['success'=>false,'message'=>mysqli_error($conn)]);
+        }
+        break;
+
+    // ── Delete product (soft delete) ───────────────────────────────────────
+    case 'delete_product':
+        $body  = json_decode(file_get_contents('php://input'), true) ?: $_POST;
+        $codep = (int)($body['codep'] ?? 0);
+        if (!$codep) { echo json_encode(['success'=>false,'message'=>'Invalid ID']); break; }
+        $row = mysqli_fetch_assoc(mysqli_query($conn, "SELECT nomp FROM produit WHERE codep=$codep LIMIT 1"));
+        $ok  = mysqli_query($conn, "UPDATE produit SET is_deleted=1, deleted_at=NOW() WHERE codep=$codep");
+        if ($ok) {
+            require_once dirname(__FILE__) . '/pos_log.php';
+            posLog($conn, $agent_id, $agent_name, 'product_deleted', "Deleted: " . ($row['nomp']??'') . " (codep $codep)", $codep, 'product');
+            echo json_encode(['success'=>true,'message'=>'Product deleted']);
+        } else {
+            echo json_encode(['success'=>false,'message'=>mysqli_error($conn)]);
+        }
+        break;
+
+    // ── Import products batch ──────────────────────────────────────────────
+    case 'import_products':
+        $body     = json_decode(file_get_contents('php://input'), true) ?: [];
+        $rows     = $body['rows'] ?? [];
+        $imported = 0; $errors = 0;
+        foreach ($rows as $row) {
+            $nomp       = mysqli_real_escape_string($conn, trim($row['nomp']       ?? ''));
+            $category   = mysqli_real_escape_string($conn, trim($row['category']   ?? ''));
+            $barcode    = mysqli_real_escape_string($conn, trim($row['barcode']    ?? ''));
+            $price      = (float)($row['price']      ?? 0);
+            $cost_price = (float)($row['cost_price'] ?? 0);
+            $unit       = mysqli_real_escape_string($conn, trim($row['unit']       ?? 'piece'));
+            $onhand     = (float)($row['onhand']     ?? 0);
+            if (!$nomp) { $errors++; continue; }
+            $ok = mysqli_query($conn,
+                "INSERT INTO produit (nomp, category, barcode, price, cost_price, unit, onhand, active)
+                 VALUES ('$nomp','$category','$barcode',$price,$cost_price,'$unit',$onhand,1)
+                 ON DUPLICATE KEY UPDATE price=VALUES(price), onhand=VALUES(onhand)");
+            $ok ? $imported++ : $errors++;
+        }
+        echo json_encode(['success'=>true,'imported'=>$imported,'errors'=>$errors]);
         break;
 
     default:

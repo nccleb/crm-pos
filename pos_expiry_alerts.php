@@ -374,7 +374,7 @@ body{background:white;color:black;}.table-wrap{border:1px solid #ccc;}.stat{back
                     </div>
                     <div class="form-row">
                         <label>Alert Threshold Days</label>
-                        <input type="text" id="alert_days_email" value="<?= $cfg['alert_days_1'] ?>, <?= $cfg['alert_days_2'] ?>, <?= $cfg['alert_days_3'] ?>" placeholder="30, 14, 7">
+                        <input type="text" id="alert_days_email" value="<?= $cfg['alert_days_1'] ?>, <?= $cfg['alert_days_2'] ?>, <?= $cfg['alert_days_3'] ?><?= !empty($cfg['alert_days_4']) ? ', '.$cfg['alert_days_4'] : '' ?>" placeholder="30, 18, 15, 5">
                         <small style="color:rgba(255,255,255,.3);font-size:11px;margin-top:4px;display:block;">Comma-separated — alert sent when days-left crosses these values</small>
                     </div>
                     <div class="form-row">
@@ -628,10 +628,11 @@ async function saveSettings() {
     body.append('smtp_from', document.getElementById('smtp_user')?.value || '');
 
     // Parse alert days
-    const days = (document.getElementById('alert_days_email')?.value || '30,14,7').split(',').map(d => parseInt(d.trim())||0);
+    const days = (document.getElementById('alert_days_email')?.value || '30,18,15,5').split(',').map(d => parseInt(d.trim())||0);
     body.append('alert_days_1', days[0]||30);
-    body.append('alert_days_2', days[1]||14);
-    body.append('alert_days_3', days[2]||7);
+    body.append('alert_days_2', days[1]||18);
+    body.append('alert_days_3', days[2]||15);
+    body.append('alert_days_4', days[3]||0);
 
     const res  = await fetch('ajax/pos_expiry_alert_ajax.php', { method:'POST', body });
     const data = await res.json();

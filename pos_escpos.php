@@ -10,6 +10,10 @@
  *  - Item subtotal column added (qty × unit_price in LBP)
  *  - sendToPrinter() uses dynamic printer_name from settings (not hardcoded 'BIXOLON')
  *  - number_format(..., 0) for all LBP amounts — no decimal places
+ *
+ * Fixed v4.7 post-release:
+ *  - $total_vat_usd was undefined after v4.6 LBP migration — caused PHP warning that
+ *    corrupted the ESC/POS binary stream, breaking printing and cash drawer trigger
  */
 
 // ── ESC/POS Constants ─────────────────────────────────────────────────────
@@ -26,6 +30,8 @@ define('FONT_NORMAL', ESC . "!\x00");      // Normal size
 define('FONT_DOUBLE', ESC . "!\x11");      // Double height+width
 define('FONT_WIDE',   ESC . "!\x20");      // Double width only
 define('CUT_PAPER',   GS  . "V\x41\x00"); // Full cut
+define('CODEPAGE_AR', ESC . "t\x28");      // Codepage 40 = PC720b Arabic (confirmed working on this BIXOLON)
+define('CODEPAGE_PC', ESC . "t\x00");      // Codepage 0  = PC437 (reset to Latin)
 
 // ─────────────────────────────────────────────────────────────────────────────
 /**
@@ -104,6 +110,39 @@ function openCashDrawer($conn) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 /**
+ * Convert a UTF-8 string that may contain Arabic to ESC/POS-safe output.
+ *
+ * ESC/POS Arabic printing on BIXOLON SRP-E300:
+ *  - Switch to codepage Windows-1256 (ESC t 21)
+ *  - Convert UTF-8 → Windows-1256 with iconv
+ *  - Reverse the string so RTL Arabic reads correctly on LTR thermal paper
+ *  - Switch back to PC437 after the Arabic segment
+ *
+ * If the string is pure ASCII/Latin, no conversion is applied.
+ */
+function escposText(string $text): string {
+    // Detect if string contains Arabic Unicode codepoints
+    if (!preg_match('/\p{Arabic}/u', $text)) {
+        return $text; // Pure Latin — no conversion needed
+    }
+    // Convert UTF-8 -> CP720 (PC720b, codepage 0x28 confirmed on this BIXOLON)
+    // iconv may not know CP720 by that name; try aliases
+    $win1256 = false;
+    foreach (['CP720', 'IBM720', 'WINDOWS-1256'] as $enc) {
+        $win1256 = @iconv('UTF-8', $enc . '//TRANSLIT//IGNORE', $text);
+        if ($win1256 !== false) break;
+    }
+    if ($win1256 === false) {
+        // iconv failed -- return transliterated ASCII fallback
+        return iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text) ?: $text;
+    }
+    // Reverse for RTL rendering on LTR thermal paper
+    $reversed = strrev($win1256);
+    return CODEPAGE_AR . $reversed . CODEPAGE_PC;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+/**
  * Main receipt builder — produces ESC/POS binary and sends to printer
  */
 function printEscPos($sale_id, $conn) {
@@ -164,8 +203,8 @@ function printEscPos($sale_id, $conn) {
     // HEADER
     // ════════════════════════════════════════════════
     $d .= ALIGN_CENTER;
-    $d .= BOLD_ON . FONT_DOUBLE . mb_substr($company_name, 0, 20) . LF . FONT_NORMAL . BOLD_OFF;
-    if ($company_address) $d .= wordwrap($company_address, $W, LF, true) . LF;
+    $d .= BOLD_ON . FONT_DOUBLE . escposText(mb_substr($company_name, 0, 20)) . LF . FONT_NORMAL . BOLD_OFF;
+    if ($company_address) $d .= escposText(wordwrap($company_address, $W, LF, true)) . LF;
     if ($company_phone)   $d .= 'Tel: ' . $company_phone . LF;
     $d .= BOLD_ON . 'SALE RECEIPT' . LF . BOLD_OFF;
     $d .= date('d M Y H:i:s', strtotime($sale['created_at'])) . LF;
@@ -176,8 +215,8 @@ function printEscPos($sale_id, $conn) {
     // ════════════════════════════════════════════════
     $d .= ALIGN_LEFT;
     $d .= twoCol('Sale #',    '#' . $sale['id'],                                            $W) . LF;
-    $d .= twoCol('Customer',  mb_substr($sale['client_name'] ?? 'Walk-in', 0, $W - 10),    $W) . LF;
-    $d .= twoCol('Cashier',   $sale['agent_name'] ?? '',                                    $W) . LF;
+    $d .= twoCol('Customer',  escposText(mb_substr($sale['client_name'] ?? 'Walk-in', 0, $W - 10)),    $W) . LF;
+    $d .= twoCol('Cashier',   escposText($sale['agent_name'] ?? ''),                                    $W) . LF;
     $d .= twoCol('Payment',   $pay_labels[$sale['payment_method']] ?? $sale['payment_method'], $W) . LF;
 
     // Refunded stamp
@@ -219,8 +258,9 @@ function printEscPos($sale_id, $conn) {
         $sub_lbp  = round((float)$item['subtotal']);
         $qty_disp = ($qty_val != intval($qty_val)) ? number_format($qty_val,3).'kg' : (string)(int)$qty_val;
 
-        $name_cell = mb_substr($item['product_name'], 0, $col_name);
-        $name_cell = str_pad($name_cell, $col_name); // pad to column width
+        $name_raw  = mb_substr($item['product_name'], 0, $col_name, 'UTF-8');
+        $name_pad  = str_pad($name_raw, $col_name);   // pad BEFORE encoding
+        $name_cell = escposText($name_pad);            // encode AFTER padding
 
         $qty_cell  = str_pad($qty_disp,                                $col_qty,  ' ', STR_PAD_LEFT);
         $unit_cell = str_pad(number_format($unit_lbp, 0),             $col_unit, ' ', STR_PAD_LEFT);
@@ -260,6 +300,7 @@ function printEscPos($sale_id, $conn) {
 
     // ── USD equivalent box ─────────────────────────────────────────────────
     if ($usd_to_lbp > 0) { // compute USD equivalent from LBP total
+        $total_vat_usd = $lbp_exact / $usd_to_lbp;   // Fixed v4.7: was undefined after LBP migration
         $d .= str_repeat('-', $W) . LF;
         $d .= ALIGN_CENTER;
         $d .= '$ ' . number_format($total_vat_usd, 2) . LF;
@@ -298,13 +339,63 @@ function printEscPos($sale_id, $conn) {
             }
         } else {
             // Fallback: compute net from paid amounts
+            // Use a LL 5,000 tolerance to suppress rounding noise from USD conversion
             $total_paid_lbp = $paid_lbp + round($paid_usd * $usd_to_lbp);
             $net_lbp        = $total_paid_lbp - $lbp_due;
-            if ($net_lbp > 0) {
+            if ($net_lbp > 5000) {
                 $d .= BOLD_ON . twoCol('Change', 'LL ' . number_format($net_lbp, 0), $W) . LF . BOLD_OFF;
-            } elseif ($net_lbp < 0) {
+            } elseif ($net_lbp < -5000) {
                 $d .= BOLD_ON . twoCol('Remaining', 'LL ' . number_format(abs($net_lbp), 0), $W) . LF . BOLD_OFF;
             }
+            // amounts within LL 5,000 of due = exact payment, show nothing
+        }
+    }
+
+    // ════════════════════════════════════════════════
+    // LOYALTY SECTION
+    // ════════════════════════════════════════════════
+    $loyalty_mode_disp = $co['loyalty_mode'] ?? 'disabled';
+    $loyalty_earned    = 0;
+    $loyalty_redeemed  = 0;
+    $loyalty_bal_after = null;
+
+    if (!empty($sale['client_id']) && $loyalty_mode_disp !== 'disabled') {
+        $lt_res = mysqli_query($conn,
+            "SELECT type, amount, balance_after FROM pos_loyalty_transactions
+             WHERE sale_id = $sid ORDER BY id ASC");
+        while ($lt = mysqli_fetch_assoc($lt_res)) {
+            if ($lt['type'] === 'earned')   { $loyalty_earned   = (int)$lt['amount']; $loyalty_bal_after = (int)$lt['balance_after']; }
+            if ($lt['type'] === 'redeemed') { $loyalty_redeemed = (int)$lt['amount']; }
+        }
+    }
+
+    if ($loyalty_earned > 0 || $loyalty_redeemed > 0) {
+        $mode_label = strtoupper($loyalty_mode_disp); // POINTS or CASHBACK
+        $d .= str_repeat('-', $W) . LF;
+        $d .= ALIGN_LEFT;
+        $d .= BOLD_ON . 'LOYALTY ' . $mode_label . LF . BOLD_OFF;
+
+        if ($loyalty_redeemed > 0) {
+            $redeem_label = ($loyalty_mode_disp === 'points') ? 'Points Redeemed' : 'Wallet Used';
+            $redeem_val   = ($loyalty_mode_disp === 'points')
+                ? '-' . number_format($loyalty_redeemed) . ' pts'
+                : '-LL ' . number_format($loyalty_redeemed);
+            $d .= twoCol($redeem_label, $redeem_val, $W) . LF;
+        }
+
+        if ($loyalty_earned > 0) {
+            $earn_label = ($loyalty_mode_disp === 'points') ? 'Points Earned' : 'Cashback Earned';
+            $earn_val   = ($loyalty_mode_disp === 'points')
+                ? '+' . number_format($loyalty_earned) . ' pts'
+                : '+LL ' . number_format($loyalty_earned);
+            $d .= twoCol($earn_label, $earn_val, $W) . LF;
+        }
+
+        if ($loyalty_bal_after !== null) {
+            $bal_val = ($loyalty_mode_disp === 'points')
+                ? number_format($loyalty_bal_after) . ' pts'
+                : 'LL ' . number_format($loyalty_bal_after);
+            $d .= twoCol('New Balance', $bal_val, $W) . LF;
         }
     }
 
@@ -314,8 +405,8 @@ function printEscPos($sale_id, $conn) {
     $d .= str_repeat('-', $W) . LF;
     $d .= ALIGN_CENTER;
     $footer_clean = str_replace(['—', '–', "\xe2\x80\x94", "\xe2\x80\x93"], '-', $receipt_footer);
-    $d .= $footer_clean . LF;
-    $d .= $company_name . ' - ' . date('Y') . LF;
+    $d .= escposText($footer_clean) . LF;
+    $d .= escposText($company_name) . ' - ' . date('Y') . LF;
 
     // Feed 4 lines so last line clears cutter blade, then cut
     $d .= ESC . "d\x04";
@@ -391,15 +482,75 @@ function sendToPrinter($data, $printer_name) {
  * Two-column row: left text flush-left, right text flush-right, total = $width
  */
 function twoCol($left, $right, $width) {
-    $left = mb_substr($left, 0, $width - mb_strlen($right) - 1);
-    $pad  = $width - mb_strlen($left) - mb_strlen($right);
-    return $left . str_repeat(' ', max(1, $pad)) . $right;
+    // Strip ESC/POS control bytes before measuring printable length
+    $printable = function($s) {
+        return preg_replace('/[\x00-\x1F\x7F](?:.{0,2})?/', '', $s);
+    };
+    $left_vis  = mb_strlen($printable($left),  'UTF-8');
+    $right_vis = mb_strlen($printable($right), 'UTF-8');
+    $pad = max(1, $width - $left_vis - $right_vis);
+    return $left . str_repeat(' ', $pad) . $right;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Arabic codepage test — prints sample Arabic text with every possible codepage
+// Usage: pos_escpos.php?action=test_arabic
+// ─────────────────────────────────────────────────────────────────────────────
+function testArabicCodepages($conn) {
+    $co = mysqli_fetch_assoc(mysqli_query($conn, "SELECT printer_name FROM company_settings LIMIT 1"));
+    $printer = trim($co['printer_name'] ?? '');
+    if (!$printer) return ['success'=>false,'error'=>'No printer name in settings'];
+
+    // Arabic sample in raw Windows-1256 bytes (avoids PHP source encoding issues)
+    // These are the Windows-1256 byte values for: خيار (kheyyar)
+    $sample_1256 = "\xd1\xed\xc7\xd1"; // simplified: just 4 Arabic letters
+    $sample_rev  = strrev($sample_1256);
+
+    $d  = "\x1B@"; // INIT
+    $d .= "\x1B\x61\x01"; // center
+    $d .= "Arabic Codepage Test\x0A";
+    $d .= str_repeat('-', 32) . "\x0A";
+
+    $codepages = [
+        0x00 => 'CP00 PC437  ',
+        0x05 => 'CP05 PC858  ',
+        0x11 => 'CP17 PC866  ',
+        0x15 => 'CP21 Win1256',
+        0x16 => 'CP22 PC720  ',
+        0x28 => 'CP40 PC720b ',
+        0x2D => 'CP45 W1256b ',
+    ];
+
+    foreach ($codepages as $cp => $label) {
+        $d .= "\x1B\x74\x00";           // reset to PC437
+        $d .= "\x1B\x61\x00";           // left align
+        $d .= sprintf("%s: ", $label);
+        $d .= "\x1B\x74" . chr($cp);     // switch to candidate codepage
+        $d .= $sample_rev . "\x0A";
+        $d .= "\x1B\x74\x00";           // reset
+    }
+
+    $d .= str_repeat('-', 32) . "\x0A";
+    $d .= "\x1B\x64\x04";               // feed 4 lines
+    $d .= "\x1D\x56\x41\x00";          // cut
+
+    return sendToPrinter($d, $printer);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Entry point when called directly via HTTP
 // ─────────────────────────────────────────────────────────────────────────────
 if (isset($_GET['sale_id']) || isset($_GET['action'])) {
+
+    // test_arabic bypasses login for local troubleshooting
+    if (($_GET['action'] ?? '') === 'test_arabic') {
+        header('Content-Type: application/json');
+        $tc = mysqli_connect("192.168.1.19", "root", "1Sys9Admeen72", "nccleb_test");
+        mysqli_set_charset($tc, 'utf8mb4');
+        echo json_encode(testArabicCodepages($tc));
+        mysqli_close($tc);
+        exit();
+    }
 
     session_start();
     header('Content-Type: application/json');

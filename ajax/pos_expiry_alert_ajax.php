@@ -264,7 +264,7 @@ switch ($action) {
     case 'save_settings':
         if (!$is_super) { echo json_encode(['success'=>false,'error'=>'Super only']); break; }
         $fields = [
-            'alert_days_1','alert_days_2','alert_days_3',
+            'alert_days_1','alert_days_2','alert_days_3','alert_days_4',
             'email_enabled','smtp_host','smtp_port','smtp_user','smtp_pass',
             'smtp_from','smtp_from_name','alert_email_to',
             'sms_enabled','sms_provider','sms_api_url','sms_api_key',

@@ -686,7 +686,8 @@ var selectedClientId   = null;
 var selectedClientName = 'Walk-in Customer';
 var paymentMethod = 'cash';
 var currency      = 'LBP';
-var searchTimeout = null;
+var searchTimeout   = null;
+var scaleToastTimer = null;
 var customerTimeout = null;
 
 
@@ -2318,10 +2319,10 @@ window.addEventListener('load', function() {
 
       <!-- Weight input (auto-focused, scale types here) -->
       <div style="display:flex;gap:6px;margin-bottom:8px;">
-        <input id="wInput" type="number" min="0" step="0.001"
+        <input id="wInput" type="text" inputmode="decimal"
                style="flex:1;font-size:1.8rem;font-weight:800;text-align:center;border:2px solid #7c3aed;border-radius:10px;padding:8px;color:#4c1d95;"
                placeholder="0.000"
-               oninput="updateWeightCalc()"
+               oninput="wInputFilter(this); updateWeightCalc()"
                onkeydown="if(event.key==='Enter') confirmWeight()">
         <div style="display:flex;flex-direction:column;gap:4px;">
           <button id="wUnitKg" onclick="setWeightUnit('kg')"
@@ -2452,6 +2453,15 @@ function confirmWeight() {
     var unit  = wUnit;
     closeWeightModal();
     addWeightedToCart(pid, pname, price, parseFloat(weightKg.toFixed(3)), unit);
+}
+
+// ── Filter direct keyboard input on wInput (type=text) ──────
+function wInputFilter(inp) {
+    // Allow only digits and one decimal point
+    var v = inp.value.replace(/[^0-9.]/g, '');
+    var parts = v.split('.');
+    if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
+    inp.value = v;
 }
 
 // ── Numpad ────────────────────────────────────────────────
