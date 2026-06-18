@@ -174,7 +174,7 @@ switch ($action) {
         // Get exchange rate AND VAT rate AND loyalty settings
         $co_rate    = mysqli_fetch_assoc(mysqli_query($conn,
             "SELECT usd_to_lbp, vat_rate, loyalty_mode, loyalty_rate,
-                    loyalty_point_value, loyalty_min_redeem, loyalty_min_grade,
+                    loyalty_point_value, loyalty_min_redeem, loyalty_min_wallet, loyalty_min_grade,
                     loyalty_rate_regular, loyalty_rate_gold,
                     loyalty_rate_platinum, loyalty_rate_premium,
                     grade_gold_threshold, grade_platinum_threshold, grade_premium_threshold
@@ -184,7 +184,10 @@ switch ($action) {
         $loyalty_mode      = $co_rate['loyalty_mode']                     ?? 'disabled';
         $loyalty_rate      = (float)($co_rate['loyalty_rate']             ?? 2.00);
         $point_value       = (int)($co_rate['loyalty_point_value']        ?? 1000);
-        $min_redeem        = (int)($co_rate['loyalty_min_redeem']         ?? 5000);
+        // Use mode-specific minimum threshold
+        $min_redeem        = $loyalty_mode === 'cashback'
+                           ? (int)($co_rate['loyalty_min_wallet']  ?? 2000000)
+                           : (int)($co_rate['loyalty_min_redeem']  ?? 180000);
         $loyalty_min_grade = $co_rate['loyalty_min_grade']                ?? 'gold';
         $rate_regular      = (float)($co_rate['loyalty_rate_regular']     ?? $loyalty_rate);
         $rate_gold         = (float)($co_rate['loyalty_rate_gold']        ?? $loyalty_rate);

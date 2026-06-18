@@ -37,7 +37,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $loyalty_mode    = in_array($_POST['loyalty_mode'] ?? '', ['disabled','points','cashback']) ? $_POST['loyalty_mode'] : 'disabled';
     $loyalty_rate    = (float)($_POST['loyalty_rate']        ?? 2.00);
     $loyalty_pv      = (int)($_POST['loyalty_point_value']   ?? 1000);
-    $loyalty_min     = (int)($_POST['loyalty_min_redeem']    ?? 5000);
+    $loyalty_min     = (int)($_POST['loyalty_min_redeem']    ?? 180000);   // points minimum
+    $loyalty_min_wallet = (int)($_POST['loyalty_min_wallet'] ?? 2000000);  // cashback minimum (LL)
     $ukey_card       = mysqli_real_escape_string($conn, trim($_POST['universal_key_card'] ?? ''));
     $loyalty_min_grd = in_array($_POST['loyalty_min_grade'] ?? '', ['regular','gold','platinum','premium']) ? $_POST['loyalty_min_grade'] : 'gold';
     $loyalty_inact   = (int)($_POST['loyalty_inactivity_days'] ?? 180);
@@ -79,6 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 loyalty_rate        = $loyalty_rate,
                 loyalty_point_value = $loyalty_pv,
                 loyalty_min_redeem  = $loyalty_min,
+                loyalty_min_wallet  = $loyalty_min_wallet,
                 universal_key_card  = " . ($ukey_card ? "'$ukey_card'" : "NULL") . ",
                 loyalty_min_grade        = '$loyalty_min_grd',
                 loyalty_inactivity_days  = $loyalty_inact,
@@ -485,7 +487,8 @@ error_reporting(E_ALL); endif; ?>
             $lmode   = $settings['loyalty_mode']        ?? 'disabled';
             $lrate   = (float)($settings['loyalty_rate'] ?? 2.00);
             $lpv     = (int)($settings['loyalty_point_value'] ?? 1000);
-            $lmin    = (int)($settings['loyalty_min_redeem']  ?? 5000);
+            $lmin        = (int)($settings['loyalty_min_redeem']  ?? 180000);   // points
+            $lmin_wallet = (int)($settings['loyalty_min_wallet']  ?? 2000000);  // cashback LL
             $lukey   = $settings['universal_key_card']   ?? '';
             $lmingrd = $settings['loyalty_min_grade']    ?? 'gold';
             $lrinact = (int)($settings['loyalty_inactivity_days'] ?? 180);
@@ -535,15 +538,30 @@ error_reporting(E_ALL); endif; ?>
                         e.g. 1000 = 1 point = LL 1,000 when redeeming.
                     </div>
                 </div>
-                <div>
-                    <label style="display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px;">
-                        Minimum Balance to Redeem
+                <!-- Points minimum — shown only in Points mode -->
+                <div id="fieldMinPoints" style="display:<?= ($settings['loyalty_mode'] ?? 'disabled') === 'points' ? 'block' : 'none' ?>;">
+                    <label style="display:block;font-size:12px;font-weight:700;color:#7c3aed;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px;">
+                        Minimum Points to Redeem
                     </label>
-                    <input type="number" name="loyalty_min_redeem" value="<?= $lmin ?>" min="0" step="1000"
+                    <input type="number" name="loyalty_min_redeem" value="<?= $lmin ?>" min="0" step="10000"
                         form="settingsForm"
-                        style="width:100%;padding:9px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;font-weight:700;">
+                        style="width:100%;padding:9px 12px;border:2px solid #7c3aed;border-radius:8px;font-size:14px;font-weight:700;">
                     <div style="font-size:11px;color:#9ca3af;margin-top:4px;">
-                        LL for cashback wallet, points count for points mode.
+                        Customer must accumulate this many points before redemption unlocks.<br>
+                        Recommended: 180,000 pts (~$200 spending at 10pts/LL1,000).
+                    </div>
+                </div>
+                <!-- Cashback minimum — shown only in Cashback mode -->
+                <div id="fieldMinWallet" style="display:<?= ($settings['loyalty_mode'] ?? 'disabled') === 'cashback' ? 'block' : 'none' ?>;">
+                    <label style="display:block;font-size:12px;font-weight:700;color:#059669;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px;">
+                        Minimum Wallet Balance to Redeem (LL)
+                    </label>
+                    <input type="number" name="loyalty_min_wallet" value="<?= $lmin_wallet ?>" min="0" step="100000"
+                        form="settingsForm"
+                        style="width:100%;padding:9px 12px;border:2px solid #059669;border-radius:8px;font-size:14px;font-weight:700;">
+                    <div style="font-size:11px;color:#9ca3af;margin-top:4px;">
+                        Customer wallet must reach this LL amount before Use Wallet unlocks.<br>
+                        Recommended: LL 2,000,000 (~$22 at current rate).
                     </div>
                 </div>
             </div>
@@ -774,6 +792,22 @@ function toggleDrawerUsb() {
     var usbField = document.getElementById('drawerUsbNameField');
     if (usbField) usbField.style.display = type === 'usb' ? '' : 'none';
 }
+
+// Show correct minimum redeem field based on loyalty mode
+function syncLoyaltyMinFields() {
+    var mode = document.querySelector('input[name="loyalty_mode"]:checked');
+    var modeVal = mode ? mode.value : 'disabled';
+    var fp = document.getElementById('fieldMinPoints');
+    var fw = document.getElementById('fieldMinWallet');
+    if (fp) fp.style.display = modeVal === 'points'   ? 'block' : 'none';
+    if (fw) fw.style.display = modeVal === 'cashback' ? 'block' : 'none';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('input[name="loyalty_mode"]').forEach(function(r) {
+        r.addEventListener('change', syncLoyaltyMinFields);
+    });
+    syncLoyaltyMinFields();
+});
 
 function testDrawer() {
     var msg = document.getElementById('testPrintMsg');

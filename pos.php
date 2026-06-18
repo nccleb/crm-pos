@@ -26,7 +26,9 @@ $vat_rate         = (float)($pos_settings['vat_rate']   ?? 0);
 $loyalty_mode      = $pos_settings['loyalty_mode']        ?? 'disabled';
 $loyalty_rate      = (float)($pos_settings['loyalty_rate']  ?? 2.00);
 $point_value       = (int)($pos_settings['loyalty_point_value'] ?? 1000);
-$min_redeem        = (int)($pos_settings['loyalty_min_redeem']  ?? 5000);
+$min_redeem_points = (int)($pos_settings['loyalty_min_redeem']  ?? 180000);   // points mode
+$min_redeem_wallet = (int)($pos_settings['loyalty_min_wallet']  ?? 2000000);  // cashback mode (LL)
+$min_redeem        = $loyalty_mode === 'cashback' ? $min_redeem_wallet : $min_redeem_points;
 $ukey_card         = $pos_settings['universal_key_card']   ?? '';
 $loyalty_min_grade = $pos_settings['loyalty_min_grade']    ?? 'gold';
 
@@ -1441,7 +1443,9 @@ var LBP_ROUND  = 5000; // smallest useful denomination in Lebanon
 var LOYALTY_MODE      = '<?= $loyalty_mode ?>';
 var LOYALTY_RATE      = <?= $loyalty_rate ?>;
 var LOYALTY_PV        = <?= $point_value ?>;
-var LOYALTY_MIN       = <?= $min_redeem ?>;
+var LOYALTY_MIN       = <?= $min_redeem ?>;           // correct value for active mode
+var LOYALTY_MIN_PTS   = <?= $min_redeem_points ?>;    // points mode minimum
+var LOYALTY_MIN_WALL  = <?= $min_redeem_wallet ?>;    // cashback mode minimum (LL)
 var UKEY_CARD         = '<?= addslashes($ukey_card) ?>';
 
 var loyaltyClientId   = null;

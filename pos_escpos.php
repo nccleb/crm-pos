@@ -110,35 +110,183 @@ function openCashDrawer($conn) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 /**
- * Convert a UTF-8 string that may contain Arabic to ESC/POS-safe output.
- *
- * ESC/POS Arabic printing on BIXOLON SRP-E300:
- *  - Switch to codepage Windows-1256 (ESC t 21)
- *  - Convert UTF-8 → Windows-1256 with iconv
- *  - Reverse the string so RTL Arabic reads correctly on LTR thermal paper
- *  - Switch back to PC437 after the Arabic segment
- *
- * If the string is pure ASCII/Latin, no conversion is applied.
+ * hasArabic() — detect Arabic characters in a UTF-8 string
+ */
+function hasArabic(string $text): bool {
+    return (bool)preg_match('/\p{Arabic}/u', $text);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * shapeArabicText() — convert base Arabic Unicode → FExx presentation forms
+ * so GD/FreeType renders connected glyphs correctly.
+ * Handles Lam-Alef ligatures (ل + ا/أ/إ/آ → لا etc.)
+ */
+function shapeArabicText(string $text): string {
+    // Presentation form tables (isolated / final / initial / medial)
+    $iso = $fin = $ini = $med = [];
+
+    $letters = [
+        0x0621 => [0xFE80, 0xFE80, 0xFE80, 0xFE80], // ء
+        0x0622 => [0xFE81, 0xFE82, 0xFE81, 0xFE82], // آ
+        0x0623 => [0xFE83, 0xFE84, 0xFE83, 0xFE84], // أ
+        0x0624 => [0xFE85, 0xFE86, 0xFE85, 0xFE86], // ؤ
+        0x0625 => [0xFE87, 0xFE88, 0xFE87, 0xFE88], // إ
+        0x0626 => [0xFE89, 0xFE8A, 0xFE8B, 0xFE8C], // ئ
+        0x0627 => [0xFE8D, 0xFE8E, 0xFE8D, 0xFE8E], // ا
+        0x0628 => [0xFE8F, 0xFE90, 0xFE91, 0xFE92], // ب
+        0x0629 => [0xFE93, 0xFE94, 0xFE93, 0xFE94], // ة
+        0x062A => [0xFE95, 0xFE96, 0xFE97, 0xFE98], // ت
+        0x062B => [0xFE99, 0xFE9A, 0xFE9B, 0xFE9C], // ث
+        0x062C => [0xFE9D, 0xFE9E, 0xFE9F, 0xFEA0], // ج
+        0x062D => [0xFEA1, 0xFEA2, 0xFEA3, 0xFEA4], // ح
+        0x062E => [0xFEA5, 0xFEA6, 0xFEA7, 0xFEA8], // خ
+        0x062F => [0xFEA9, 0xFEAA, 0xFEA9, 0xFEAA], // د
+        0x0630 => [0xFEAB, 0xFEAC, 0xFEAB, 0xFEAC], // ذ
+        0x0631 => [0xFEAD, 0xFEAE, 0xFEAD, 0xFEAE], // ر
+        0x0632 => [0xFEAF, 0xFEB0, 0xFEAF, 0xFEB0], // ز
+        0x0633 => [0xFEB1, 0xFEB2, 0xFEB3, 0xFEB4], // س
+        0x0634 => [0xFEB5, 0xFEB6, 0xFEB7, 0xFEB8], // ش
+        0x0635 => [0xFEB9, 0xFEBA, 0xFEBB, 0xFEBC], // ص
+        0x0636 => [0xFEBD, 0xFEBE, 0xFEBF, 0xFEC0], // ض
+        0x0637 => [0xFEC1, 0xFEC2, 0xFEC3, 0xFEC4], // ط
+        0x0638 => [0xFEC5, 0xFEC6, 0xFEC7, 0xFEC8], // ظ
+        0x0639 => [0xFEC9, 0xFECA, 0xFECB, 0xFECC], // ع
+        0x063A => [0xFECD, 0xFECE, 0xFECF, 0xFED0], // غ
+        0x0641 => [0xFED1, 0xFED2, 0xFED3, 0xFED4], // ف
+        0x0642 => [0xFED5, 0xFED6, 0xFED7, 0xFED8], // ق
+        0x0643 => [0xFED9, 0xFEDA, 0xFEDB, 0xFEDC], // ك
+        0x0644 => [0xFEDD, 0xFEDE, 0xFEDF, 0xFEE0], // ل
+        0x0645 => [0xFEE1, 0xFEE2, 0xFEE3, 0xFEE4], // م
+        0x0646 => [0xFEE5, 0xFEE6, 0xFEE7, 0xFEE8], // ن
+        0x0647 => [0xFEE9, 0xFEEA, 0xFEEB, 0xFEEC], // ه
+        0x0648 => [0xFEED, 0xFEEE, 0xFEED, 0xFEEE], // و
+        0x0649 => [0xFEEF, 0xFEF0, 0xFEEF, 0xFEF0], // ى
+        0x064A => [0xFEF1, 0xFEF2, 0xFEF3, 0xFEF4], // ي
+    ];
+
+    // Letters that do NOT connect to the left (disconnect after)
+    $no_left = [0x0621,0x0622,0x0623,0x0624,0x0625,0x0627,0x0629,0x062F,
+                0x0630,0x0631,0x0632,0x0648,0x0649];
+    $no_left_set = array_flip($no_left);
+
+    // Convert UTF-8 string to array of codepoints
+    $codepoints = [];
+    $len = mb_strlen($text, 'UTF-8');
+    for ($i = 0; $i < $len; $i++) {
+        $codepoints[] = mb_ord(mb_substr($text, $i, 1, 'UTF-8'), 'UTF-8');
+    }
+
+    $result = [];
+    $n = count($codepoints);
+    for ($i = 0; $i < $n; $i++) {
+        $cp = $codepoints[$i];
+        if (!isset($letters[$cp])) {
+            $result[] = $cp;
+            continue;
+        }
+        $has_prev = ($i > 0) && isset($letters[$codepoints[$i-1]])
+                    && !isset($no_left_set[$codepoints[$i-1]]);
+        $has_next = ($i < $n-1) && isset($letters[$codepoints[$i+1]]);
+        if ($has_prev && $has_next)      $form = 3; // medial
+        elseif ($has_prev)               $form = 1; // final
+        elseif ($has_next)               $form = 2; // initial
+        else                             $form = 0; // isolated
+        $result[] = $letters[$cp][$form];
+    }
+
+    // Reverse for RTL rendering and encode back to UTF-8
+    $result = array_reverse($result);
+    $out = '';
+    foreach ($result as $cp) {
+        $out .= mb_chr($cp, 'UTF-8');
+    }
+    return $out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * printArabicLine() — render Arabic text as ESC* bitmap via GD + trado.ttf
+ * Returns raw ESC/POS bytes for one line of Arabic text.
+ * Falls back to '?' characters if GD or font not available.
+ */
+function printArabicLine(string $text, int $font_size = 28): string {
+    $font = 'C:\Windows\Fonts\trado.ttf';
+    if (!function_exists('imagecreatetruecolor') || !file_exists($font)) {
+        $fallback = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text) ?: '???';
+        return $fallback . "\n";
+    }
+
+    $shaped  = shapeArabicText($text);
+    $ESC     = "\x1B";
+
+    // ── Measure text to build narrow image ────────────────────────────────
+    $box    = imagettfbbox($font_size, 0, $font, $shaped);
+    $tw     = abs($box[2] - $box[0]);
+    $th     = abs($box[5] - $box[3]);
+
+    // CRITICAL: keep image narrow (max 200px).
+    // Full-width 576px gets truncated by the Windows print spooler
+    // causing Arabic to disappear entirely from the receipt.
+    $img_w  = min($tw + 8, 200);
+    $img_h  = $th + 10;
+
+    $img   = imagecreatetruecolor($img_w, $img_h);
+    $white = imagecolorallocate($img, 255, 255, 255);
+    $black = imagecolorallocate($img, 0,   0,   0  );
+    imagefill($img, 0, 0, $white);
+
+    $x = max(0, $img_w - $tw - 4);   // right-align within narrow image
+    $y = $img_h - 4;
+    imagettftext($img, $font_size, 0, $x, $y, $black, $font, $shaped);
+
+    // ── Posterize — threshold luma < 128 ─────────────────────────────────
+    // FreeType anti-aliases to grey (~R=192). Without posterize the
+    // grey pixels fall above any reasonable threshold and print blank.
+    for ($py = 0; $py < $img_h; $py++) {
+        for ($px = 0; $px < $img_w; $px++) {
+            $rgb  = imagecolorat($img, $px, $py);
+            $luma = 0.299*(($rgb>>16)&0xFF) + 0.587*(($rgb>>8)&0xFF) + 0.114*($rgb&0xFF);
+            imagesetpixel($img, $px, $py, $luma < 128 ? $black : $white);
+        }
+    }
+
+    // ── ESC* 24-dot column raster ─────────────────────────────────────────
+    $out     = '';
+    $slice_h = 24;
+
+    for ($row = 0; $row < $img_h; $row += $slice_h) {
+        $out .= $ESC . '3' . chr($slice_h);
+        $out .= $ESC . '*' . chr(33) . chr($img_w & 0xFF) . chr(($img_w >> 8) & 0xFF);
+        for ($px = 0; $px < $img_w; $px++) {
+            for ($b = 0; $b < 3; $b++) {
+                $byte = 0;
+                for ($bit = 0; $bit < 8; $bit++) {
+                    $py = $row + $b * 8 + $bit;
+                    if ($py < $img_h) {
+                        $rgb  = imagecolorat($img, $px, $py);
+                        $luma = 0.299*(($rgb>>16)&0xFF) + 0.587*(($rgb>>8)&0xFF) + 0.114*($rgb&0xFF);
+                        if ($luma < 128) $byte |= (1 << (7 - $bit));
+                    }
+                }
+                $out .= chr($byte);
+            }
+        }
+        $out .= $ESC . 'J' . chr(24);   // advance paper exactly 24 dots per band
+    }
+
+    $out .= $ESC . '2';   // reset line spacing to default
+    imagedestroy($img);
+    return $out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * escposText() — for non-Arabic strings only. Arabic is handled by printArabicLine().
  */
 function escposText(string $text): string {
-    // Detect if string contains Arabic Unicode codepoints
-    if (!preg_match('/\p{Arabic}/u', $text)) {
-        return $text; // Pure Latin — no conversion needed
-    }
-    // Convert UTF-8 -> CP720 (PC720b, codepage 0x28 confirmed on this BIXOLON)
-    // iconv may not know CP720 by that name; try aliases
-    $win1256 = false;
-    foreach (['CP720', 'IBM720', 'WINDOWS-1256'] as $enc) {
-        $win1256 = @iconv('UTF-8', $enc . '//TRANSLIT//IGNORE', $text);
-        if ($win1256 !== false) break;
-    }
-    if ($win1256 === false) {
-        // iconv failed -- return transliterated ASCII fallback
-        return iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text) ?: $text;
-    }
-    // Reverse for RTL rendering on LTR thermal paper
-    $reversed = strrev($win1256);
-    return CODEPAGE_AR . $reversed . CODEPAGE_PC;
+    // Strip any remaining Arabic codepoints (should not happen — caller should use printArabicLine)
+    return iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text) ?: $text;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -237,11 +385,11 @@ function printEscPos($sale_id, $conn) {
     // ════════════════════════════════════════════════
     $d .= str_repeat('-', $W) . LF;
 
-    // Column widths
+    // Column widths — unit/sub need 12 chars for large LBP prices (e.g. 110,120,000)
     $col_qty  = 4;
-    $col_unit = ($W === 42) ? 10 : 9;
-    $col_sub  = ($W === 42) ? 10 : 9;
-    $col_name = $W - $col_qty - $col_unit - $col_sub; // 42 → 18 | 32 → 10
+    $col_unit = ($W === 42) ? 12 : 10;
+    $col_sub  = ($W === 42) ? 12 : 10;
+    $col_name = $W - $col_qty - $col_unit - $col_sub; // 42 → 14 | 32 → 8
 
     // Header row
     $hdr_name = str_pad('PRODUCT', $col_name);
@@ -258,15 +406,30 @@ function printEscPos($sale_id, $conn) {
         $sub_lbp  = round((float)$item['subtotal']);
         $qty_disp = ($qty_val != intval($qty_val)) ? number_format($qty_val,3).'kg' : (string)(int)$qty_val;
 
-        $name_raw  = mb_substr($item['product_name'], 0, $col_name, 'UTF-8');
-        $name_pad  = str_pad($name_raw, $col_name);   // pad BEFORE encoding
-        $name_cell = escposText($name_pad);            // encode AFTER padding
+        // Truncate numbers if they overflow column width
+        $unit_str  = number_format($unit_lbp, 0);
+        $sub_str   = number_format($sub_lbp,  0);
+        if (strlen($unit_str) > $col_unit) $unit_str = substr($unit_str, -$col_unit);
+        if (strlen($sub_str)  > $col_sub)  $sub_str  = substr($sub_str,  -$col_sub);
 
-        $qty_cell  = str_pad($qty_disp,                                $col_qty,  ' ', STR_PAD_LEFT);
-        $unit_cell = str_pad(number_format($unit_lbp, 0),             $col_unit, ' ', STR_PAD_LEFT);
-        $sub_cell  = str_pad(number_format($sub_lbp,  0),             $col_sub,  ' ', STR_PAD_LEFT);
+        $qty_cell  = str_pad($qty_disp, $col_qty,  ' ', STR_PAD_LEFT);
+        $unit_cell = str_pad($unit_str, $col_unit, ' ', STR_PAD_LEFT);
+        $sub_cell  = str_pad($sub_str,  $col_sub,  ' ', STR_PAD_LEFT);
+        $numbers_row = $qty_cell . $unit_cell . $sub_cell . LF;
 
-        $d .= $name_cell . $qty_cell . $unit_cell . $sub_cell . LF;
+        $name_raw = $item['product_name'];
+
+        if (hasArabic($name_raw)) {
+            // Arabic name: bitmap line first, then numbers indented to right
+            $d .= printArabicLine($name_raw);
+            $d .= str_repeat(' ', $W - strlen($numbers_row) + 1) . $numbers_row;
+        } else {
+            // Latin name: truncate + mb-safe padding then inline
+            $name_truncated = mb_substr($name_raw, 0, $col_name, 'UTF-8');
+            $name_vis       = mb_strlen($name_truncated, 'UTF-8');
+            $name_cell      = $name_truncated . str_repeat(' ', max(0, $col_name - $name_vis));
+            $d .= $name_cell . $numbers_row;
+        }
     }
 
     // ════════════════════════════════════════════════
