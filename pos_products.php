@@ -671,7 +671,7 @@ tbody td {
             <span class="toggle-slider"></span>
           </label>
           <span class="toggle-label">⚖️ Scale / Weight-Based Pricing</span>
-          <span class="toggle-sublabel">TEG TM-A / EAN-13 prefix-2</span>
+          <span class="toggle-sublabel">Barcode printing scale / EAN-13 prefix-2</span>
         </div>
 
         <div class="scale-section" id="scaleSection">
@@ -680,7 +680,7 @@ tbody td {
             <div class="form-group">
               <label>PLU Code * <span style="color:var(--purple)">(links to scale)</span></label>
               <input type="text" id="editPluCode" placeholder="e.g. 70002" maxlength="10">
-              <span class="hint warn">⚠️ Must exactly match the PLU programmed in the TEG scale</span>
+              <span class="hint warn">⚠️ Must exactly match the PLU programmed in the scale</span>
             </div>
             <div class="form-group">
               <label>Price per KG (LL)</label>
