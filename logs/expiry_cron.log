@@ -1,6 +1,3 @@
-[2026-05-21 05:00:01] === Expiry Alert Cron Started ===
-[2026-05-21 05:00:01] Settings loaded — Email: ON | SMS: OFF | Thresholds: 30/18/15 days
-[2026-05-21 05:00:01] No batches hit a threshold today (30,18,15 days). No alerts sent.
 [2026-05-26 20:18:19] === Expiry Alert Cron Started ===
 [2026-05-26 20:18:19] Settings loaded — Email: ON | SMS: OFF | Thresholds: 30/18/15 days
 [2026-05-26 20:18:19] No batches hit a threshold today (30,18,15 days). No alerts sent.
@@ -60,3 +57,14 @@
 [2026-06-19 05:06:40] === Expiry Alert Cron Started ===
 [2026-06-19 05:06:40] Settings loaded — Email: ON | SMS: OFF | Thresholds: 30/18/15/5 days
 [2026-06-19 05:06:40] No batches within threshold today (≤30 days). No alerts sent.
+[2026-06-20 18:20:53] === Expiry Alert Cron Started ===
+[2026-06-22 11:38:35] === Expiry Alert Cron Started ===
+[2026-06-22 11:38:35] Log rotated — removed 3 old line(s), kept 61 line(s) (last 30 days).
+[2026-06-22 11:38:35] Settings loaded — Email: ON | SMS: OFF | Thresholds: 30/18/15/5 days
+[2026-06-22 11:38:35] No batches within threshold today (≤30 days). No alerts sent.
+[2026-06-22 11:41:06] === Expiry Alert Cron Started ===
+[2026-06-22 11:41:07] Settings loaded — Email: ON | SMS: OFF | Thresholds: 30/18/15/5 days
+[2026-06-22 11:41:07] No batches within threshold today (≤30 days). No alerts sent.
+[2026-06-23 10:27:30] === Expiry Alert Cron Started ===
+[2026-06-23 10:27:30] Settings loaded — Email: ON | SMS: OFF | Thresholds: 30/18/15/5 days
+[2026-06-23 10:27:30] No batches within threshold today (≤30 days). No alerts sent.
